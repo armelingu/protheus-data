@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="/statics/css/login/login.css">
+    <title>HBR Aviação - Login</title>
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-area">
+            <p class="login-kicker">Acesso interno</p>
+            <h1>HBR</h1>
+            <h2>Central de Relatórios Protheus</h2>
+            <p class="login-intro">Entre com sua conta corporativa para acessar os relatórios disponíveis no ambiente interno.</p>
+            <form id="loginform">
+                <div class="campo">
+                    <label for="usuario">Usuário</label>
+                    <input type="text" id="usuario" name="usuario" placeholder="Digite seu usuário" autocomplete="username" required>
+                </div>
+                <div class="campo">
+                    <label for="senha">Senha</label>
+                    <input type="password" id="senha" name="senha" placeholder="Digite sua senha" autocomplete="current-password" required>
+                </div>
+                <button type="submit">Entrar</button>
+            </form>
+            <div class="erro" id="erro" aria-live="polite"></div>
+            <p class="link-cadastro">Não tem conta? Entre em contato com o TI!</p>
+        </div>
+    </div>
+    <script src="/statics/js/login/login.js"></script>
+</body>
+</html>

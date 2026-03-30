@@ -1,0 +1,213 @@
+.dashboard-painel {
+    width: 100%;
+    max-width: 930px;
+    padding: 30px 30px 26px;
+    border: 1px solid #e7e7e7;
+    background: #ffffff;
+    animation: fadeIn 0.35s ease;
+}
+
+.dashboard-header {
+    margin-bottom: 24px;
+    padding-bottom: 18px;
+    border-bottom: 1px solid #efefef;
+}
+
+.dashboard-kicker {
+    margin: 0 0 8px;
+    color: #adadad;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 1.1px;
+    text-transform: uppercase;
+}
+
+.dashboard-painel h1 {
+    margin: 0 0 6px;
+    font-size: 24px;
+    font-weight: 600;
+    letter-spacing: -0.7px;
+    line-height: 1.12;
+}
+
+.dashboard-subtitulo {
+    margin: 0;
+    color: #8a8a8a;
+    font-size: 12px;
+    line-height: 1.7;
+    max-width: 500px;
+}
+
+.dashboard-modulos {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.dashboard-modulo {
+    display: grid;
+    grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+    gap: 18px;
+    padding: 16px 0;
+    border: none;
+    border-top: 1px solid #efefef;
+    background-color: transparent;
+    align-items: stretch;
+}
+
+.dashboard-modulo:first-child {
+    padding-top: 0;
+    border-top: none;
+}
+
+.dashboard-modulo-topo {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 12px;
+    padding-right: 8px;
+    border-right: 1px solid #efefef;
+}
+
+.dashboard-modulo-label {
+    margin: 0 0 7px;
+    color: #ababab;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}
+
+.dashboard-modulo-topo h2 {
+    margin: 0;
+    font-size: 17px;
+    font-weight: 600;
+    letter-spacing: -0.4px;
+}
+
+.dashboard-modulo-topo p {
+    margin: 0;
+    color: #878787;
+    font-size: 12px;
+    line-height: 1.7;
+}
+
+.dashboard-relatorios {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.dashboard-card {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    justify-content: flex-start;
+    min-height: 100%;
+    padding: 14px 0 12px;
+    border: none;
+    border-bottom: 1px solid #efefef;
+    background-color: #ffffff;
+    color: #1a1a1a;
+    text-decoration: none;
+    transition:
+        color 0.2s ease,
+        opacity 0.2s ease;
+}
+
+.dashboard-card:hover {
+    color: #111111;
+}
+
+.dashboard-card-label {
+    color: #adadad;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.9px;
+    text-transform: uppercase;
+}
+
+.dashboard-card strong {
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.4;
+}
+
+.dashboard-card-texto {
+    flex: 1;
+}
+
+.dashboard-card-cta {
+    margin-top: 4px;
+    color: #8c8c8c;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    transition: color 0.2s ease;
+}
+
+.dashboard-card:hover .dashboard-card-cta {
+    color: #555555;
+}
+
+.dashboard-card-texto,
+.dashboard-vazio {
+    color: #8b8b8b;
+    font-size: 12px;
+    line-height: 1.7;
+}
+
+.dashboard-vazio {
+    grid-column: 1 / -1;
+    padding: 14px 0 4px;
+    border: none;
+    border-bottom: 1px solid #efefef;
+    background-color: #ffffff;
+}
+
+.dashboard-card:focus-visible {
+    outline: 2px solid #1a1a1a;
+    outline-offset: 2px;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 760px) {
+    .dashboard-painel {
+        padding: 26px 22px 22px;
+    }
+
+    .dashboard-modulo {
+        grid-template-columns: 1fr;
+    }
+
+    .dashboard-modulo-topo {
+        padding-right: 0;
+        padding-bottom: 12px;
+        border-right: none;
+        border-bottom: 1px solid #efefef;
+    }
+}
+
+@media (max-width: 640px) {
+    .dashboard-relatorios {
+        grid-template-columns: 1fr;
+    }
+
+    .dashboard-painel h1 {
+        font-size: 21px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .dashboard-painel,
+    .dashboard-card,
+    .dashboard-card-cta {
+        animation: none;
+        transition: none;
+    }
+}

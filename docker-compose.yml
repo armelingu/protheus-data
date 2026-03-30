@@ -1,0 +1,15 @@
+services:
+  web:
+    build: .
+    container_name: orders_consult
+    ports:
+      - "5000:5000"
+    env_file:
+      - .env
+    environment:
+      TZ: America/Sao_Paulo
+      APP_TIMEZONE: America/Sao_Paulo
+      SYNC_LOOKBACK_DAYS: "30"
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

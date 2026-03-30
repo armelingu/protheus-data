@@ -1,0 +1,48 @@
+{% extends "base_auth.html" %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="/statics/css/relatorios/home.css">
+{% endblock %}
+
+{% block page_content %}
+<section class="dashboard-painel">
+    <header class="dashboard-header">
+        <p class="dashboard-kicker">Ambiente interno</p>
+        <h1>Central de Relatórios</h1>
+        <p class="dashboard-subtitulo">Escolha um módulo e acesse o relatório desejado.</p>
+    </header>
+
+    <div class="dashboard-modulos">
+        {% if modulos_menu %}
+        {% for modulo in modulos_menu %}
+        <section class="dashboard-modulo">
+            <div class="dashboard-modulo-topo">
+                <div>
+                    <p class="dashboard-modulo-label">Módulo</p>
+                    <h2>{{ modulo.titulo }}</h2>
+                </div>
+                <p>{{ modulo.descricao }}</p>
+            </div>
+
+            <div class="dashboard-relatorios">
+                {% if modulo.relatorios %}
+                    {% for relatorio in modulo.relatorios %}
+                    <a href="{{ relatorio.path }}" class="dashboard-card">
+                        <span class="dashboard-card-label">Relatório</span>
+                        <strong>{{ relatorio.titulo }}</strong>
+                        <span class="dashboard-card-texto">{{ relatorio.descricao }}</span>
+                        <span class="dashboard-card-cta">Abrir relatório</span>
+                    </a>
+                    {% endfor %}
+                {% else %}
+                    <div class="dashboard-vazio">Relatórios deste módulo serão adicionados em breve.</div>
+                {% endif %}
+            </div>
+        </section>
+        {% endfor %}
+        {% else %}
+        <div class="dashboard-vazio">Nenhum relatório está liberado para o seu usuário no momento.</div>
+        {% endif %}
+    </div>
+</section>
+{% endblock %}

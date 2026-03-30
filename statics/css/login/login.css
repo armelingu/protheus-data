@@ -1,0 +1,247 @@
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@600;700&display=swap');
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html {
+    scrollbar-width: thin;
+    scrollbar-color: #b8b8b8 #f1f1f1;
+}
+
+html::-webkit-scrollbar {
+    width: 12px;
+}
+
+html::-webkit-scrollbar-track {
+    background: #f1f1f1;
+}
+
+html::-webkit-scrollbar-thumb {
+    background: #b8b8b8;
+    border: 3px solid #f1f1f1;
+}
+
+html::-webkit-scrollbar-thumb:hover {
+    background: #969696;
+}
+
+body {
+    font-family: 'Segoe UI', Arial, Helvetica, sans-serif;
+    background:
+        linear-gradient(180deg, #f8f8f8 0%, #f2f2f2 100%);
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 22px;
+}
+
+.login-container {
+    width: 100%;
+    max-width: 420px;
+}
+
+.login-area {
+    background:
+        linear-gradient(180deg, #ffffff 0%, #fbfbfb 100%);
+    position: relative;
+    overflow: hidden;
+    padding: 34px 32px 30px;
+    text-align: left;
+    border: 1px solid #dddddd;
+    box-shadow: 0 14px 36px rgba(0, 0, 0, 0.04);
+    animation: fadeIn 0.4s ease;
+}
+
+.login-area::before {
+    content: '';
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 1px;
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0.98) 0%, rgba(255, 255, 255, 0.14) 100%);
+    pointer-events: none;
+}
+
+.login-kicker {
+    color: #9d9d9d;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1.45px;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+}
+
+.login-area h1 {
+    color: #1a1a1a;
+    font-family: 'Sora', 'Segoe UI', Arial, Helvetica, sans-serif;
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: -1px;
+    line-height: 1.1;
+    margin-bottom: 6px;
+}
+
+.login-area h2 {
+    color: #7f7f7f;
+    font-size: 13px;
+    font-weight: 400;
+    line-height: 1.6;
+    margin-bottom: 8px;
+}
+
+.login-intro {
+    color: #9a9a9a;
+    font-size: 11px;
+    line-height: 1.65;
+    margin-bottom: 24px;
+    max-width: 300px;
+}
+
+.campo {
+    margin-bottom: 16px;
+    text-align: left;
+}
+
+.campo:focus-within label {
+    color: #4c4c4c;
+}
+
+.campo label {
+    display: block;
+    color: #888888;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+}
+
+.campo input {
+    width: 100%;
+    padding: 12px 12px;
+    border: 1px solid #dddddd;
+    background-color: #f8f8f8;
+    color: #1a1a1a;
+    font-family: inherit;
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.2s, background-color 0.2s, box-shadow 0.2s;
+}
+
+.campo input::placeholder {
+    color: #c0c0c0;
+}
+
+.campo input:focus {
+    border-color: #1a1a1a;
+    background-color: #ffffff;
+    box-shadow: inset 0 0 0 1px #1a1a1a;
+}
+
+#loginform button {
+    width: 100%;
+    padding: 13px;
+    margin-top: 8px;
+    background-color: #1a1a1a;
+    color: #ffffff;
+    border: none;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.9px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: background-color 0.2s, opacity 0.2s, transform 0.2s;
+}
+
+#loginform button:hover:not(:disabled) {
+    background-color: #333333;
+    transform: translateY(-1px);
+}
+
+#loginform button.is-loading {
+    position: relative;
+    color: transparent;
+}
+
+#loginform button.is-loading::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 14px;
+    height: 14px;
+    margin: -7px 0 0 -7px;
+    border-radius: 50%;
+    border: 2px solid #ffffff;
+    border-right-color: transparent;
+    animation: spin 0.8s linear infinite;
+}
+
+#loginform button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.erro {
+    color: #cc0000;
+    font-size: 11px;
+    margin-top: 16px;
+    min-height: 14px;
+    opacity: 0;
+    transform: translateY(2px);
+    transition: opacity 0.18s ease, transform 0.18s ease;
+}
+
+.erro.visivel {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.link-cadastro {
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid #ececec;
+    font-size: 10px;
+    letter-spacing: 0.3px;
+    color: #b9b9b9;
+    line-height: 1.5;
+}
+
+.campo input:focus-visible,
+#loginform button:focus-visible {
+    outline: 2px solid #1a1a1a;
+    outline-offset: 2px;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+@media (max-width: 480px) {
+    .login-area {
+        padding: 26px 20px 22px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .login-area,
+    .campo input,
+    #loginform button,
+    .erro {
+        animation: none;
+        transition: none;
+    }
+
+    #loginform button.is-loading::after {
+        animation: none;
+    }
+}

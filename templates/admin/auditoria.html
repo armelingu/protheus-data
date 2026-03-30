@@ -1,0 +1,70 @@
+{% extends "base_auth.html" %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="/statics/css/admin/admin.css">
+{% endblock %}
+
+{% block page_content %}
+<section class="admin-shell">
+    <header class="admin-header">
+        <div class="admin-header-copy">
+            <p class="admin-kicker">Administração</p>
+            <h1>Auditoria</h1>
+            <p class="admin-subtitulo">Visualize a trilha administrativa e os eventos recentes de uso do sistema em um formato mais direto, técnico e fácil de conferir.</p>
+        </div>
+
+        <nav class="admin-tabs" aria-label="Navegação da administração">
+            <a href="/admin/usuarios" class="admin-tab">Usuários</a>
+            <a href="/admin/auditoria" class="admin-tab ativo">Auditoria</a>
+        </nav>
+    </header>
+
+    <section class="admin-panel">
+        <div class="admin-panel-top">
+            <div>
+                <p class="admin-section-kicker">Trilha administrativa</p>
+                <h2>Eventos de administração</h2>
+            </div>
+            <p class="admin-panel-texto">Criação de usuários, ajustes de permissões, ativações, desativações e redefinições de senha.</p>
+        </div>
+        <div class="admin-log-table">
+            <div class="admin-log-head">
+                <span>Evento</span>
+                <span>Origem</span>
+                <span>Data</span>
+            </div>
+            <div id="logs-auditoria" class="admin-log-body">
+                <p class="admin-vazio">Carregando auditoria...</p>
+            </div>
+        </div>
+    </section>
+
+    <section class="admin-panel">
+        <div class="admin-panel-top">
+            <div>
+                <p class="admin-section-kicker">Uso do sistema</p>
+                <h2>Eventos de acesso</h2>
+            </div>
+            <p class="admin-panel-texto">Últimos logins, logouts, downloads e sincronizações executadas pelos usuários do ambiente.</p>
+        </div>
+        <div class="admin-log-table">
+            <div class="admin-log-head">
+                <span>Ação</span>
+                <span>Origem</span>
+                <span>Data</span>
+            </div>
+            <div id="logs-acesso" class="admin-log-body">
+                <p class="admin-vazio">Carregando logs de acesso...</p>
+            </div>
+        </div>
+    </section>
+</section>
+
+<div class="toast-area" aria-live="polite" aria-atomic="true">
+    <div class="mensagem" id="mensagem"></div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/statics/js/admin/auditoria.js"></script>
+{% endblock %}

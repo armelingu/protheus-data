@@ -1,0 +1,27 @@
+{% extends "base_auth.html" %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="/statics/css/admin/admin.css">
+{% endblock %}
+
+{% block page_content %}
+<section class="admin-painel">
+    <header class="admin-topo">
+        <div>
+            <p class="admin-kicker">Acesso restrito</p>
+            <h1>Conteúdo não liberado</h1>
+            <p class="admin-subtitulo">{{ mensagem }}</p>
+        </div>
+    </header>
+
+    <section class="admin-bloco">
+        <div class="admin-bloco-topo">
+            <div>
+                <p class="admin-bloco-label">Permissões</p>
+                <h2>Solicite liberação ao superadmin</h2>
+            </div>
+            <p>Se esse acesso deveria estar disponível para você, peça ao responsável para revisar as permissões do seu usuário.</p>
+        </div>
+    </section>
+</section>
+{% endblock %}
