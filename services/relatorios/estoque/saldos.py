@@ -50,12 +50,14 @@ INSERT_ESTOQUE = '''
 '''
 
 
-def registrar_sync_event(registros_novos, status, erro_resumo=None):
+def registrar_sync_event(registros_novos, status, erro_resumo=None,
+                         total_protheus=None, total_local=None):
     conn = conectar_pedidos()
     conn.execute(
-        'INSERT INTO estoque_sync_log (executado_em, registros_novos, status, erro_resumo) '
-        'VALUES (?, ?, ?, ?)',
-        (agora(), registros_novos, status, erro_resumo)
+        'INSERT INTO estoque_sync_log '
+        '(executado_em, registros_novos, status, erro_resumo, total_protheus, total_local) '
+        'VALUES (?, ?, ?, ?, ?, ?)',
+        (agora(), registros_novos, status, erro_resumo, total_protheus, total_local)
     )
     conn.commit()
     conn.close()
@@ -102,16 +104,17 @@ def consolidar_sync_log():
 
 
 def _normalizar_linhas(linhas):
+    """Converte linhas do Protheus em tuplas com tipos nativos (float para números)."""
     dados = []
 
     for linha in linhas:
         produto = str(linha[0]).strip() if linha[0] is not None else ''
         filial = str(linha[1]).strip() if linha[1] is not None else ''
         armazem = str(linha[2]).strip() if linha[2] is not None else ''
-        saldo_atual = _formatar_decimal(_to_decimal(linha[3]))
-        qtde_pedidos_venda = _formatar_decimal(_to_decimal(linha[4]))
-        qtde_reserva = _formatar_decimal(_to_decimal(linha[5]))
-        saldo_disponivel = _formatar_decimal(
+        saldo_atual = float(_to_decimal(linha[3]))
+        qtde_pedidos_venda = float(_to_decimal(linha[4]))
+        qtde_reserva = float(_to_decimal(linha[5]))
+        saldo_disponivel = float(
             _to_decimal(linha[3]) - _to_decimal(linha[4]) - _to_decimal(linha[5])
         )
 
@@ -136,11 +139,18 @@ def _to_decimal(valor):
         return Decimal('0')
 
 
-def _formatar_decimal(valor):
-    texto = format(valor.normalize(), 'f')
-    if '.' in texto:
-        texto = texto.rstrip('0').rstrip('.')
-    return texto or '0'
+def _formatar_numero_csv(valor):
+    """Formata float para string limpa na exportação (sem zeros desnecessários)."""
+    if valor is None:
+        return ''
+    try:
+        v = Decimal(str(valor))
+        texto = format(v.normalize(), 'f')
+        if '.' in texto:
+            texto = texto.rstrip('0').rstrip('.')
+        return texto or '0'
+    except Exception:
+        return str(valor)
 
 
 def _snapshot_atual():
@@ -164,7 +174,7 @@ def _snapshot_atual():
     ]
 
 
-def _substituir_snapshot(dados):
+def _substituir_snapshot(dados, total_protheus=None):
     anterior = Counter(_snapshot_atual())
     atual = Counter(
         (linha[0], linha[2], linha[3], linha[4], linha[5], linha[6], linha[7])
@@ -177,9 +187,24 @@ def _substituir_snapshot(dados):
     if dados:
         conn.executemany(INSERT_ESTOQUE, dados)
     conn.commit()
+    total_local = conn.execute('SELECT COUNT(*) FROM estoque_saldos').fetchone()[0]
     conn.close()
 
-    registrar_sync_event(alterados, 'sucesso' if alterados > 0 else 'sem_novos')
+    tp = total_protheus if total_protheus is not None else len(dados)
+    divergencia = abs(tp - total_local) / max(tp, 1) if tp > 0 else 0
+    if divergencia > 0.05:
+        status = 'alerta'
+    elif alterados > 0:
+        status = 'sucesso'
+    else:
+        status = 'sem_novos'
+
+    registrar_sync_event(
+        alterados,
+        status,
+        total_protheus=tp,
+        total_local=total_local,
+    )
     return alterados
 
 
@@ -192,16 +217,14 @@ def carga_inicial():
         return 0
 
     linhas = executar_select(QUERY_ESTOQUE)
-
     dados = _normalizar_linhas(linhas)
-    return _substituir_snapshot(dados)
+    return _substituir_snapshot(dados, total_protheus=len(linhas))
 
 
 def sincronizar():
     linhas = executar_select(QUERY_ESTOQUE)
-
     dados = _normalizar_linhas(linhas)
-    return _substituir_snapshot(dados)
+    return _substituir_snapshot(dados, total_protheus=len(linhas))
 
 
 def info_relatorio():
@@ -237,11 +260,18 @@ def gerar_csv():
     linhas = conn.execute(SELECT_ESTOQUE).fetchall()
     conn.close()
 
+    colunas_numericas = {'SALDO_ATUAL', 'QTDE_EM_PEDIDOS_VENDA', 'QTDE_EM_RESERVA'}
+    indices_numericos = {i for i, c in enumerate(COLUNAS) if c in colunas_numericas}
+
     output = io.StringIO()
     writer = csv.writer(output, delimiter=';')
     writer.writerow(COLUNAS)
     for linha in linhas:
-        writer.writerow([str(valor).strip() if valor is not None else '' for valor in linha])
+        writer.writerow([
+            _formatar_numero_csv(valor) if i in indices_numericos
+            else (str(valor).strip() if valor is not None else '')
+            for i, valor in enumerate(linha)
+        ])
     output.seek(0)
     return output.getvalue(), len(linhas)
 
@@ -253,13 +283,25 @@ def gerar_excel():
     linhas = conn.execute(SELECT_ESTOQUE).fetchall()
     conn.close()
 
+    colunas_numericas = {'SALDO_ATUAL', 'QTDE_EM_PEDIDOS_VENDA', 'QTDE_EM_RESERVA'}
+    indices_numericos = {i for i, c in enumerate(COLUNAS) if c in colunas_numericas}
+
     wb = Workbook()
     ws = wb.active
     ws.title = 'Saldo em Estoque'
     ws.append(COLUNAS)
 
     for linha in linhas:
-        ws.append([str(valor).strip() if valor is not None else '' for valor in linha])
+        linha_formatada = []
+        for i, valor in enumerate(linha):
+            if i in indices_numericos and valor is not None:
+                try:
+                    linha_formatada.append(float(valor))
+                except (TypeError, ValueError):
+                    linha_formatada.append(valor)
+            else:
+                linha_formatada.append(str(valor).strip() if valor is not None else '')
+        ws.append(linha_formatada)
 
     for col in ws.columns:
         max_len = max(len(str(cell.value or '')) for cell in col)

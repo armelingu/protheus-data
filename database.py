@@ -50,6 +50,20 @@ def _recriar_estoque_saldos_sem_unique(conn):
         conn.execute('DROP TABLE IF EXISTS estoque_saldos')
 
 
+def _migrar_estoque_saldos_para_real(conn):
+    """Recria estoque_saldos com colunas numéricas REAL se ainda estiverem como TEXT."""
+    tabela_sql = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'estoque_saldos'"
+    ).fetchone()
+
+    if not tabela_sql or not tabela_sql['sql']:
+        return
+
+    ddl = tabela_sql['sql'].upper()
+    if 'SALDO_ATUAL REAL' not in ddl:
+        conn.execute('DROP TABLE IF EXISTS estoque_saldos')
+
+
 def _popular_permissoes_iniciais(conn):
     usuarios = conn.execute('SELECT id FROM usuarios').fetchall()
     total_permissoes = conn.execute(
@@ -221,6 +235,7 @@ def criar_tabelas():
 
     conn = conectar_pedidos()
     _recriar_estoque_saldos_sem_unique(conn)
+    _migrar_estoque_saldos_para_real(conn)
     conn.execute('''
         CREATE TABLE IF NOT EXISTS pedidos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -250,6 +265,8 @@ def criar_tabelas():
     ''')
     _garantir_coluna(conn, 'sync_log', 'status', 'TEXT')
     _garantir_coluna(conn, 'sync_log', 'erro_resumo', 'TEXT')
+    _garantir_coluna(conn, 'sync_log', 'total_protheus', 'INTEGER')
+    _garantir_coluna(conn, 'sync_log', 'total_local', 'INTEGER')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_sync_log_executado_em ON sync_log(executado_em)')
     conn.execute('''
         CREATE TABLE IF NOT EXISTS downloads_log (
@@ -269,10 +286,10 @@ def criar_tabelas():
             descricao_produto TEXT,
             filial TEXT,
             armazem TEXT,
-            saldo_atual TEXT,
-            qtde_pedidos_venda TEXT,
-            qtde_reserva TEXT,
-            saldo_disponivel TEXT
+            saldo_atual REAL,
+            qtde_pedidos_venda REAL,
+            qtde_reserva REAL,
+            saldo_disponivel REAL
         )
     ''')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_estoque_saldos_filial_armazem ON estoque_saldos(filial, armazem)')
@@ -287,6 +304,8 @@ def criar_tabelas():
     ''')
     _garantir_coluna(conn, 'estoque_sync_log', 'status', 'TEXT')
     _garantir_coluna(conn, 'estoque_sync_log', 'erro_resumo', 'TEXT')
+    _garantir_coluna(conn, 'estoque_sync_log', 'total_protheus', 'INTEGER')
+    _garantir_coluna(conn, 'estoque_sync_log', 'total_local', 'INTEGER')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_estoque_sync_log_executado_em ON estoque_sync_log(executado_em)')
     conn.execute('''
         CREATE TABLE IF NOT EXISTS estoque_downloads_log (

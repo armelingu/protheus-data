@@ -60,20 +60,31 @@ SELECT_PEDIDOS = (
 )
 
 INSERT_PEDIDO = '''
-    INSERT OR IGNORE INTO pedidos
+    INSERT INTO pedidos
     (usuario, filial, pedido_compra, item, produto,
      descricao_produto, quantidade, cod_fornecedor,
      fornecedor, deposito_estoque, data_emissao)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(filial, pedido_compra, item) DO UPDATE SET
+        usuario           = excluded.usuario,
+        produto           = excluded.produto,
+        descricao_produto = excluded.descricao_produto,
+        quantidade        = excluded.quantidade,
+        cod_fornecedor    = excluded.cod_fornecedor,
+        fornecedor        = excluded.fornecedor,
+        deposito_estoque  = excluded.deposito_estoque,
+        data_emissao      = excluded.data_emissao
 '''
 
 
-def registrar_sync_event(registros_novos, status, erro_resumo=None):
+def registrar_sync_event(registros_novos, status, erro_resumo=None,
+                         total_protheus=None, total_local=None):
     conn = conectar_pedidos()
     conn.execute(
-        'INSERT INTO sync_log (executado_em, registros_novos, status, erro_resumo) '
-        'VALUES (?, ?, ?, ?)',
-        (agora(), registros_novos, status, erro_resumo)
+        'INSERT INTO sync_log '
+        '(executado_em, registros_novos, status, erro_resumo, total_protheus, total_local) '
+        'VALUES (?, ?, ?, ?, ?, ?)',
+        (agora(), registros_novos, status, erro_resumo, total_protheus, total_local)
     )
     conn.commit()
     conn.close()
@@ -117,9 +128,39 @@ def consolidar_sync_log():
 
     conn.commit()
     conn.close()
-def _inserir_no_sqlite(linhas):
+def _detectar_e_remover_deletados(chaves_protheus, data_corte):
+    """Remove do cache local registros que sumiram do Protheus na janela de lookback."""
+    conn = conectar_pedidos()
+    locais = conn.execute(
+        'SELECT filial, pedido_compra, item FROM pedidos WHERE data_emissao >= ?',
+        (data_corte,)
+    ).fetchall()
+
+    para_deletar = [
+        (r['filial'], r['pedido_compra'], r['item'])
+        for r in locais
+        if (r['filial'], r['pedido_compra'], r['item']) not in chaves_protheus
+    ]
+
+    if para_deletar:
+        conn.executemany(
+            'DELETE FROM pedidos WHERE filial=? AND pedido_compra=? AND item=?',
+            para_deletar
+        )
+        conn.commit()
+
+    conn.close()
+    return len(para_deletar)
+
+
+def _upsert_no_sqlite(linhas, data_corte=None):
+    total_protheus = len(linhas)
+
     if not linhas:
-        registrar_sync_event(0, 'sem_novos')
+        conn = conectar_pedidos()
+        total_local = conn.execute('SELECT COUNT(*) FROM pedidos').fetchone()[0]
+        conn.close()
+        registrar_sync_event(0, 'sem_novos', total_protheus=0, total_local=total_local)
         return 0
 
     dados = [
@@ -127,19 +168,40 @@ def _inserir_no_sqlite(linhas):
         for linha in linhas
     ]
 
+    chaves_protheus = {(d[1], d[2], d[3]) for d in dados}
+
     conn = conectar_pedidos()
     antes = conn.execute('SELECT COUNT(*) FROM pedidos').fetchone()[0]
     conn.executemany(INSERT_PEDIDO, dados)
     depois = conn.execute('SELECT COUNT(*) FROM pedidos').fetchone()[0]
-    inseridos = depois - antes
     conn.commit()
     conn.close()
 
+    novos = depois - antes
+
+    removidos = 0
+    if data_corte:
+        removidos = _detectar_e_remover_deletados(chaves_protheus, data_corte)
+
+    conn = conectar_pedidos()
+    total_local = conn.execute('SELECT COUNT(*) FROM pedidos').fetchone()[0]
+    conn.close()
+
+    divergencia = abs(total_protheus - total_local) / max(total_protheus, 1)
+    if divergencia > 0.05:
+        status = 'alerta'
+    elif novos > 0 or removidos > 0:
+        status = 'sucesso'
+    else:
+        status = 'sem_novos'
+
     registrar_sync_event(
-        inseridos,
-        'sucesso' if inseridos > 0 else 'sem_novos'
+        novos,
+        status,
+        total_protheus=total_protheus,
+        total_local=total_local,
     )
-    return inseridos
+    return novos
 
 
 def _calcular_data_corte(data_emissao_maxima):
@@ -160,8 +222,7 @@ def carga_inicial():
         return 0
 
     linhas = executar_select(QUERY_COMPLETA)
-
-    return _inserir_no_sqlite(linhas)
+    return _upsert_no_sqlite(linhas)
 
 
 def sincronizar():
@@ -173,9 +234,10 @@ def sincronizar():
         data_corte = _calcular_data_corte(resultado)
         linhas = executar_select(QUERY_NOVOS, (data_corte,))
     else:
+        data_corte = None
         linhas = executar_select(QUERY_COMPLETA)
 
-    return _inserir_no_sqlite(linhas)
+    return _upsert_no_sqlite(linhas, data_corte=data_corte)
 
 
 def info_relatorio():

@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import threading
 from datetime import timedelta
 from functools import wraps
@@ -695,20 +696,32 @@ def rotina_sync():
         if not sync_lock.acquire(blocking=False):
             print('[SYNC] Sincronização já em andamento. Pulando execução automática.')
         else:
-            try:
-                novos_pedidos = sincronizar_pedidos()
-                alterados_estoque = sincronizar_estoque()
-                ultimo_sync_dt = agora_sp()
-                if criar_backup_diario():
-                    print('[BACKUP] Backup diário criado com sucesso.')
-                print(f'[SYNC] Pedidos sincronizados. {novos_pedidos} registro(s) novo(s).')
-                print(f'[SYNC] Estoque sincronizado. {alterados_estoque} registro(s) alterado(s).')
-            except Exception as e:
-                registrar_sync_event_pedidos(0, 'erro', str(e)[:180])
-                registrar_sync_event_estoque(0, 'erro', str(e)[:180])
-                print(f'[SYNC] Erro na sincronização: {e}')
-            finally:
-                sync_lock.release()
+            MAX_TENTATIVAS = 3
+            ultimo_erro = None
+            for tentativa in range(1, MAX_TENTATIVAS + 1):
+                try:
+                    novos_pedidos = sincronizar_pedidos()
+                    alterados_estoque = sincronizar_estoque()
+                    ultimo_sync_dt = agora_sp()
+                    if criar_backup_diario():
+                        print('[BACKUP] Backup diário criado com sucesso.')
+                    print(f'[SYNC] Pedidos sincronizados. {novos_pedidos} registro(s) novo(s).')
+                    print(f'[SYNC] Estoque sincronizado. {alterados_estoque} registro(s) alterado(s).')
+                    ultimo_erro = None
+                    break
+                except Exception as e:
+                    ultimo_erro = e
+                    if tentativa < MAX_TENTATIVAS:
+                        espera = 60 * tentativa
+                        print(f'[SYNC] Tentativa {tentativa}/{MAX_TENTATIVAS} falhou: {e}. '
+                              f'Aguardando {espera}s antes de tentar novamente.')
+                        time.sleep(espera)
+                    else:
+                        print(f'[SYNC] Todas as {MAX_TENTATIVAS} tentativas falharam. Último erro: {e}')
+            if ultimo_erro is not None:
+                registrar_sync_event_pedidos(0, 'erro', str(ultimo_erro)[:180])
+                registrar_sync_event_estoque(0, 'erro', str(ultimo_erro)[:180])
+            sync_lock.release()
     else:
         print(f'[SYNC] Fora do horário (08h-19h). Atual: {hora_atual}h. Pulando.')
 
