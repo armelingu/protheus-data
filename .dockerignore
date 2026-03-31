@@ -19,6 +19,7 @@ __pycache__/
 # Documentação e scripts auxiliares
 *.md
 scripts/
+deploy.sh
 
 # Sistema operacional
 .DS_Store
