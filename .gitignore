@@ -5,9 +5,18 @@ env/
 
 # Variáveis de ambiente (contém credenciais)
 .env
+.env.local
+.env.*.local
 
-# Dados de runtime (bancos e backups)
+# Dados de runtime (bancos, volumes e backups)
 data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs (podem conter informações sensíveis)
+*.log
+logs/
 
 # Cache Python
 __pycache__/
