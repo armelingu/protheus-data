@@ -28,25 +28,36 @@ document.addEventListener('DOMContentLoaded', function() {
     /* ── tradução de ações de administração ───────────────────────────────── */
     var LABELS_ADMIN = {
         'usuario_criado':                   'Usuário criado',
-        'usuario_configuracao_atualizada':  'Permissões atualizadas',
+        'usuario_configuracao_atualizada':  'Perfil e permissões atualizados',
         'usuario_status_alterado':          'Status alterado',
-        'usuario_senha_resetada':           'Senha resetada',
-        'email_reenviado':                  'E-mail reenviado',
+        'usuario_reset_senha':              'Senha resetada',
         'usuario_desativado':               'Usuário desativado',
         'usuario_ativado':                  'Usuário ativado',
+        'email_acesso_enviado':             'E-mail de acesso enviado',
+        'email_acesso_falhou':              'Falha no envio de e-mail',
+        'email_acesso_reenviado':           'E-mail de acesso reenviado',
+        'email_acesso_reenvio_falhou':      'Falha no reenvio de e-mail',
+        'troca_senha_primeiro_acesso':      'Senha definida no primeiro acesso',
+        'login_negado_usuario_inativo':     'Login negado — conta inativa',
+        'login_negado_senha_incorreta':     'Login negado — senha incorreta',
+        'setor_criado':                     'Setor criado',
+        'setor_excluido':                   'Setor excluído',
+        'setor_atualizado':                 'Setor atualizado',
+        'gerente_atualizou_permissoes':     'Permissões ajustadas pelo gerente',
     };
 
     /* ── tradução de ações de acesso ──────────────────────────────────────── */
     var LABELS_ACESSO = {
-        'login':                'Login realizado',
-        'logout':               'Logout realizado',
-        'download_csv':         'Download CSV',
-        'download_excel':       'Download Excel',
-        'sync_manual':          'Sincronização manual',
-        'sync_manual_estoque':  'Sync manual — Estoque',
-        'sync_manual_pedidos':  'Sync manual — Pedidos',
-        'primeiro_acesso':      'Primeira troca de senha',
-        'reset_senha':          'Senha redefinida',
+        'login':                        'Login realizado',
+        'login_primeiro_acesso':        'Login (primeiro acesso)',
+        'logout':                       'Logout realizado',
+        'download_csv':                 'Download CSV — Pedidos',
+        'download_excel':               'Download Excel — Pedidos',
+        'download_estoque_csv':         'Download CSV — Estoque',
+        'download_estoque_excel':       'Download Excel — Estoque',
+        'sync_manual':                  'Sync manual — Pedidos',
+        'sync_manual_estoque':          'Sync manual — Estoque',
+        'troca_senha_primeiro_acesso':  'Senha definida no primeiro acesso',
     };
 
     function labelAdmin(acao) {
