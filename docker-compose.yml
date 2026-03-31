@@ -3,7 +3,7 @@ services:
     build: .
     container_name: orders_consult
     ports:
-      - "5000:5000"
+      - "5005:5000"
     env_file:
       - .env
     environment:
