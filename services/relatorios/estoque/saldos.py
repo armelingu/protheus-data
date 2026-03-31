@@ -17,6 +17,7 @@ COLUNAS = [
     'SALDO_ATUAL',
     'QTDE_EM_PEDIDOS_VENDA',
     'QTDE_EM_RESERVA',
+    'SALDO_DISPONIVEL',
 ]
 
 QUERY_ESTOQUE = """
@@ -38,7 +39,7 @@ ORDER BY
 
 SELECT_ESTOQUE = (
     'SELECT produto, filial, armazem, saldo_atual, '
-    'qtde_pedidos_venda, qtde_reserva '
+    'qtde_pedidos_venda, qtde_reserva, saldo_disponivel '
     'FROM estoque_saldos ORDER BY filial, armazem, produto DESC'
 )
 
@@ -260,7 +261,7 @@ def gerar_csv():
     linhas = conn.execute(SELECT_ESTOQUE).fetchall()
     conn.close()
 
-    colunas_numericas = {'SALDO_ATUAL', 'QTDE_EM_PEDIDOS_VENDA', 'QTDE_EM_RESERVA'}
+    colunas_numericas = {'SALDO_ATUAL', 'QTDE_EM_PEDIDOS_VENDA', 'QTDE_EM_RESERVA', 'SALDO_DISPONIVEL'}
     indices_numericos = {i for i, c in enumerate(COLUNAS) if c in colunas_numericas}
 
     output = io.StringIO()
@@ -283,7 +284,7 @@ def gerar_excel():
     linhas = conn.execute(SELECT_ESTOQUE).fetchall()
     conn.close()
 
-    colunas_numericas = {'SALDO_ATUAL', 'QTDE_EM_PEDIDOS_VENDA', 'QTDE_EM_RESERVA'}
+    colunas_numericas = {'SALDO_ATUAL', 'QTDE_EM_PEDIDOS_VENDA', 'QTDE_EM_RESERVA', 'SALDO_DISPONIVEL'}
     indices_numericos = {i for i, c in enumerate(COLUNAS) if c in colunas_numericas}
 
     wb = Workbook()
