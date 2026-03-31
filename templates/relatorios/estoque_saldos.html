@@ -1,7 +1,7 @@
 {% extends "base_auth.html" %}
 
 {% block extra_head %}
-<link rel="stylesheet" href="/statics/css/consulta/consulta.css">
+<link rel="stylesheet" href="/statics/css/relatorios/consulta.css">
 {% endblock %}
 
 {% block page_content %}
@@ -54,6 +54,7 @@
         </div>
     </div>
 
+    {% if pode_ver_query %}
     <details class="query-details">
         <summary>Ver query executada</summary>
         <div class="details-content">
@@ -62,6 +63,7 @@
             </div>
         </div>
     </details>
+    {% endif %}
 
     <details class="query-details">
         <summary>Ver histórico de atualizações</summary>

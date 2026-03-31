@@ -202,6 +202,20 @@ body.auth-body.is-page-transitioning .app-shell {
     color: #1a1a1a;
 }
 
+.menu-rodape {
+    margin-top: auto;
+    padding-top: 20px;
+    border-top: 1px solid #e8e8e8;
+}
+
+.menu-rodape span {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    color: #c0c0c0;
+}
+
 .menu-home:focus-visible,
 .menu-link:focus-visible,
 .menu-sair:focus-visible {

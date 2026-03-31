@@ -10,57 +10,80 @@
         <div class="admin-header-copy">
             <p class="admin-kicker">Administração</p>
             <h1>Usuários</h1>
-            <p class="admin-subtitulo">Gerencie contas, perfil administrativo, permissões por relatório e o ciclo de acesso de cada usuário em uma visão operacional.</p>
+            <p class="admin-subtitulo">Gerencie contas, permissões por relatório, perfil administrativo e o ciclo de acesso de cada usuário.</p>
         </div>
-
         <nav class="admin-tabs" aria-label="Navegação da administração">
-            <a href="/admin/usuarios" class="admin-tab ativo">Usuários</a>
+            <a href="/admin/usuarios"  class="admin-tab ativo">Usuários</a>
+            <a href="/admin/setores"   class="admin-tab">Setores</a>
             <a href="/admin/auditoria" class="admin-tab">Auditoria</a>
         </nav>
     </header>
 
+    <!-- Criar usuário -->
     <section class="admin-panel admin-panel-create">
         <div class="admin-panel-top">
             <div>
                 <p class="admin-section-kicker">Cadastro</p>
                 <h2>Novo usuário</h2>
             </div>
-            <p class="admin-panel-texto">A senha inicial será igual ao login e a troca será obrigatória no primeiro acesso.</p>
+            <p class="admin-panel-texto">A senha inicial será igual ao login. A troca será obrigatória no primeiro acesso.</p>
         </div>
 
         <form id="form-criar-usuario" class="admin-create-form">
-            <div class="admin-create-grid">
+            <div class="admin-create-row">
                 <label class="admin-field">
                     <span>E-mail corporativo</span>
-                    <input type="email" name="email" placeholder="ex.: gustavo.armelin@hbraviacao.com.br" inputmode="email" required>
-                    <small class="admin-field-hint">O sistema vai gerar automaticamente o login, o nome e a senha inicial a partir desse e-mail.</small>
+                    <input type="email" name="email"
+                           placeholder="ex.: gustavo.armelin@hbraviacao.com.br"
+                           inputmode="email" required>
+                    <small class="admin-field-hint">Login, nome e senha inicial serão gerados automaticamente a partir deste e-mail.</small>
                 </label>
-                <label class="admin-toggle">
-                    <input type="checkbox" name="is_admin" id="novo-is-admin">
-                    <span>Tornar este usuário superadmin</span>
+
+                <label class="admin-field">
+                    <span>Setor</span>
+                    <select name="setor_id" id="novo-setor-id">
+                        <option value="">— Sem setor —</option>
+                    </select>
                 </label>
-                <div class="admin-create-actions">
-                    <button type="submit" class="admin-btn admin-btn-primario">Criar usuário</button>
+
+                <div class="admin-create-toggles">
+                    <label class="admin-toggle">
+                        <input type="checkbox" name="is_admin" id="novo-is-admin">
+                        <span>Administrador total do sistema</span>
+                    </label>
+                    <label class="admin-toggle">
+                        <input type="checkbox" name="is_gerente" id="novo-is-gerente">
+                        <span>Gerente do setor</span>
+                    </label>
+                    <label class="admin-toggle">
+                        <input type="checkbox" name="pode_ver_query" id="novo-pode-ver-query">
+                        <span>Pode ver a query SQL dos relatórios</span>
+                    </label>
                 </div>
             </div>
 
             <div class="admin-permissions-box">
                 <div class="admin-permissions-head">
                     <span class="admin-section-kicker">Relatórios liberados</span>
-                    <span class="admin-panel-texto">Se o usuário for superadmin, todas as permissões ficam implícitas.</span>
+                    <span class="admin-panel-texto">Superadmin tem acesso implícito a todos os relatórios.</span>
                 </div>
                 <div class="admin-permissions-grid" id="novo-usuario-permissoes"></div>
+            </div>
+
+            <div class="admin-create-footer">
+                <button type="submit" class="admin-btn admin-btn-primario">Criar usuário</button>
             </div>
         </form>
     </section>
 
+    <!-- Lista de usuários -->
     <section class="admin-panel">
         <div class="admin-panel-top">
             <div>
                 <p class="admin-section-kicker">Operação</p>
                 <h2>Usuários cadastrados</h2>
             </div>
-            <p class="admin-panel-texto">Abra cada linha para editar permissões, alternar o perfil administrativo, resetar senha ou ativar e desativar acessos.</p>
+            <p class="admin-panel-texto">Clique em "Editar" para abrir o painel de configuração de cada usuário.</p>
         </div>
 
         <div class="admin-table">
@@ -69,7 +92,7 @@
                 <span>Perfil</span>
                 <span>Status</span>
                 <span>Último login</span>
-                <span>Ações</span>
+                <span></span>
             </div>
             <div id="lista-usuarios" class="admin-table-body">
                 <p class="admin-vazio">Carregando usuários...</p>
@@ -83,6 +106,7 @@
 </div>
 
 <script type="application/json" id="admin-relatorios-catalogo">{{ relatorios_catalogo|tojson }}</script>
+<script id="admin-setores-url" type="application/json">"/api/admin/setores"</script>
 {% endblock %}
 
 {% block extra_scripts %}

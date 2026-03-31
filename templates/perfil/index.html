@@ -1,0 +1,199 @@
+{% extends "base_auth.html" %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="/statics/css/admin/admin.css">
+<style>
+.perfil-shell { max-width: 860px; margin: 0 auto; padding: 32px 24px; }
+.perfil-header { margin-bottom: 32px; }
+.perfil-header h1 { font-size: 1.6rem; font-weight: 700; color: #1a1a1a; margin: 0 0 4px; }
+.perfil-header p { color: #888; font-size: .9rem; margin: 0; }
+.perfil-panel { background: #fff; border: 1px solid #e8e8e8; border-radius: 10px; margin-bottom: 20px; overflow: hidden; }
+.perfil-panel-head { padding: 20px 24px 0; }
+.perfil-panel-head h2 { font-size: 1rem; font-weight: 700; color: #1a1a1a; margin: 0 0 2px; }
+.perfil-panel-head p { font-size: .82rem; color: #888; margin: 0 0 16px; }
+.perfil-panel-body { padding: 0 24px 20px; }
+.info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+.info-item { }
+.info-item strong { display: block; font-size: .75rem; font-weight: 600; color: #aaa; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 4px; }
+.info-item span { font-size: .9rem; color: #1a1a1a; }
+.pbi-divider { border: none; border-top: 1px solid #f0f0f0; margin: 16px 0; }
+.token-list { list-style: none; margin: 0 0 16px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.token-item { display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: #fafafa; border: 1px solid #eee; border-radius: 0; }
+.token-item-info { flex: 1; min-width: 0; }
+.token-item-nome { font-size: .9rem; font-weight: 600; color: #1a1a1a; }
+.token-item-meta { font-size: .78rem; color: #aaa; margin-top: 2px; }
+.token-btn-revogar { padding: 5px 12px; border: 1px solid #e0e0e0; background: #fff; color: #c0392b; border-radius: 0; font-size: .8rem; cursor: pointer; white-space: nowrap; }
+.token-btn-revogar:hover { background: #fdecea; border-color: #c0392b; }
+.criar-token-row { display: flex; gap: 10px; align-items: flex-end; }
+.criar-token-row .admin-field { flex: 1; }
+.criar-token-row .admin-field input { width: 100%; }
+.token-novo-box { padding: 14px 16px; background: #f0faf3; border: 1px solid #b2e0c0; border-radius: 0; margin-top: 14px; }
+.token-novo-box p { margin: 0 0 8px; font-size: .85rem; color: #2d7a47; font-weight: 600; }
+.token-novo-box small { display: block; margin-bottom: 10px; font-size: .78rem; color: #555; }
+.token-copy-row { display: flex; gap: 8px; align-items: center; }
+.token-value { flex: 1; font-family: monospace; font-size: .82rem; background: #fff; border: 1px solid #c5e8d0; border-radius: 0; padding: 8px 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #1a1a1a; }
+.token-copy-btn { padding: 7px 14px; background: #1a1a1a; color: #fff; border: none; border-radius: 0; font-size: .82rem; cursor: pointer; white-space: nowrap; }
+.token-copy-btn:hover { background: #333; }
+.pbi-steps { margin: 0; padding: 0; list-style: none; counter-reset: steps; display: flex; flex-direction: column; gap: 10px; }
+.pbi-steps li { counter-increment: steps; display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; background: #fafafa; border: 1px solid #eee; border-radius: 0; font-size: .85rem; color: #333; }
+.pbi-steps li::before { content: counter(steps); min-width: 24px; height: 24px; background: #1a1a1a; color: #fff; border-radius: 0; display: flex; align-items: center; justify-content: center; font-size: .75rem; font-weight: 700; flex-shrink: 0; }
+.pbi-steps li strong { display: block; font-weight: 600; margin-bottom: 2px; color: #1a1a1a; }
+.pbi-steps li code { font-family: monospace; background: #f0f0f0; padding: 2px 6px; border-radius: 0; font-size: .82rem; word-break: break-all; }
+.endpoint-row { display: flex; gap: 10px; align-items: center; background: #fafafa; border: 1px solid #eee; border-radius: 0; padding: 10px 14px; }
+.endpoint-tag { font-size: .7rem; font-weight: 700; padding: 3px 8px; background: #1a1a1a; color: #fff; border-radius: 0; text-transform: uppercase; letter-spacing: .5px; white-space: nowrap; }
+.endpoint-url { flex: 1; font-family: monospace; font-size: .82rem; color: #1a1a1a; word-break: break-all; }
+.endpoint-copy { padding: 5px 12px; border: 1px solid #e0e0e0; background: #fff; color: #1a1a1a; border-radius: 0; font-size: .8rem; cursor: pointer; white-space: nowrap; }
+.endpoint-copy:hover { background: #f5f5f5; }
+</style>
+{% endblock %}
+
+{% block page_content %}
+<section class="perfil-shell">
+    <div class="perfil-header">
+        <h1>Meu Perfil</h1>
+        <p>Gerencie suas informações, tokens de API e integrações com ferramentas externas.</p>
+    </div>
+
+    <!-- Informações do usuário -->
+    <div class="perfil-panel">
+        <div class="perfil-panel-head">
+            <h2>Informações da conta</h2>
+            <p>Dados do seu perfil no sistema.</p>
+        </div>
+        <div class="perfil-panel-body">
+            <div class="info-grid">
+                <div class="info-item">
+                    <strong>Nome</strong>
+                    <span>{{ usuario_atual.nome }}</span>
+                </div>
+                <div class="info-item">
+                    <strong>Login</strong>
+                    <span>{{ usuario_atual.usuario }}</span>
+                </div>
+                <div class="info-item">
+                    <strong>Perfil</strong>
+                    <span>{% if usuario_atual.is_admin %}Superadmin{% elif usuario_atual.is_gerente %}Gerente{% else %}Usuário{% endif %}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Power BI / Tokens -->
+    <div class="perfil-panel">
+        <div class="perfil-panel-head">
+            <h2>Integração — Power BI &amp; Excel</h2>
+            <p>Crie tokens de acesso para conectar Power BI, Excel ou qualquer ferramenta que consuma dados via URL.</p>
+        </div>
+        <div class="perfil-panel-body">
+
+            <p style="font-size:.85rem;color:#555;margin:0 0 16px;">
+                Cada token é uma chave pessoal e intransferível. Quando conectado a um relatório, ele sempre retornará os dados mais recentes do cache sincronizado.
+                Guarde o token em local seguro — ele só é exibido <strong>uma vez</strong> no momento da criação.
+            </p>
+
+            <div class="criar-token-row">
+                <label class="admin-field">
+                    <span>Nome do token</span>
+                    <input type="text" id="token-nome" placeholder="ex.: Power BI Controladoria" maxlength="60">
+                </label>
+                <button type="button" class="admin-btn admin-btn-primario" id="btn-criar-token" style="white-space:nowrap">+ Gerar token</button>
+            </div>
+
+            <div id="token-novo-reveal" style="display:none"></div>
+
+            <hr class="pbi-divider" style="margin-top:20px">
+
+            <p style="font-size:.82rem;font-weight:600;color:#aaa;margin:0 0 10px;text-transform:uppercase;letter-spacing:.5px;">Tokens ativos</p>
+            <ul class="token-list" id="token-list">
+                <li style="font-size:.85rem;color:#aaa">Carregando...</li>
+            </ul>
+
+            <hr class="pbi-divider">
+
+            <!-- Endpoints — só exibe o que o usuário tem permissão -->
+            {% if pode_pedidos or pode_estoque %}
+            <p style="font-size:.82rem;font-weight:600;color:#aaa;margin:0 0 10px;text-transform:uppercase;letter-spacing:.5px;">Endpoints disponíveis para você</p>
+
+            <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px" id="endpoints-box">
+                {% if pode_pedidos %}
+                <div class="endpoint-row">
+                    <span class="endpoint-tag">Pedidos</span>
+                    <span class="endpoint-url" id="url-pedidos"></span>
+                    <button type="button" class="endpoint-copy" data-target="url-pedidos">Copiar</button>
+                </div>
+                {% endif %}
+                {% if pode_estoque %}
+                <div class="endpoint-row">
+                    <span class="endpoint-tag">Estoque</span>
+                    <span class="endpoint-url" id="url-estoque"></span>
+                    <button type="button" class="endpoint-copy" data-target="url-estoque">Copiar</button>
+                </div>
+                {% endif %}
+            </div>
+            {% else %}
+            <div style="padding:12px 14px;background:#fafafa;border:1px solid #eee;border-radius:8px;margin-bottom:20px;font-size:.85rem;color:#888">
+                Você não possui permissão em nenhum relatório com integração disponível no momento.
+                Solicite acesso ao administrador.
+            </div>
+            {% endif %}
+
+            <hr class="pbi-divider">
+
+            <!-- Instruções Power BI -->
+            <p style="font-size:.82rem;font-weight:600;color:#aaa;margin:0 0 12px;text-transform:uppercase;letter-spacing:.5px;">Como conectar no Power BI Desktop</p>
+
+            <ol class="pbi-steps">
+                <li>
+                    <div>
+                        <strong>Gere um token acima</strong>
+                        Clique em "+ Gerar token", dê um nome identificável (ex.: "Power BI Relatórios") e copie o valor exibido.
+                    </div>
+                </li>
+                <li>
+                    <div>
+                        <strong>Abra o Power BI Desktop</strong>
+                        No menu <em>Página Inicial</em>, clique em <strong>Obter Dados → Feed OData</strong>.
+                    </div>
+                </li>
+                <li>
+                    <div>
+                        <strong>Cole a URL do endpoint</strong>
+                        Use um dos endpoints exibidos acima, com o token gerado já incluído.<br>
+                        {% if pode_pedidos %}<small>Exemplo: <code id="url-exemplo-pedidos"></code></small>{% endif %}
+                    </div>
+                </li>
+                <li>
+                    <div>
+                        <strong>Autenticação</strong>
+                        Quando solicitado, escolha <strong>Anônima</strong> — a autenticação já está embutida na URL via token.
+                    </div>
+                </li>
+                <li>
+                    <div>
+                        <strong>Carregue e modele os dados</strong>
+                        Clique em <strong>Carregar</strong> (ou <strong>Transformar Dados</strong> se quiser ajustar colunas). Os dados são atualizados automaticamente a cada hora pelo sistema.
+                    </div>
+                </li>
+            </ol>
+
+            <div style="padding:12px 14px;background:#fff8e6;border-left:3px solid #e0a800;border-radius:0 6px 6px 0;margin-top:16px;font-size:.82rem;color:#7a5510">
+                <strong>Dica:</strong> No Power BI, configure a <em>Atualização Agendada</em> do relatório para replicar automaticamente a frequência de sync do sistema (a cada 1 hora).
+            </div>
+        </div>
+    </div>
+</section>
+
+<div class="toast-area" aria-live="polite" aria-atomic="true">
+    <div class="mensagem" id="mensagem"></div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script type="application/json" id="perfil-permissoes">
+{
+    "pode_pedidos": {{ pode_pedidos | tojson }},
+    "pode_estoque": {{ pode_estoque | tojson }}
+}
+</script>
+<script src="/statics/js/perfil/perfil.js"></script>
+{% endblock %}

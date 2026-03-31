@@ -64,6 +64,19 @@ def _migrar_estoque_saldos_para_real(conn):
         conn.execute('DROP TABLE IF EXISTS estoque_saldos')
 
 
+def _popular_setores_iniciais(conn):
+    setores = [
+        ('Controladoria Financeira', 'Setor de Controladoria Financeira'),
+        ('Financeira',               'Setor Financeiro'),
+        ('Qualidade',                'Setor de Qualidade'),
+    ]
+    for nome, descricao in setores:
+        conn.execute(
+            'INSERT OR IGNORE INTO setores (nome, descricao, ativo, criado_em) VALUES (?, ?, 1, ?)',
+            (nome, descricao, agora())
+        )
+
+
 def _popular_permissoes_iniciais(conn):
     usuarios = conn.execute('SELECT id FROM usuarios').fetchall()
     total_permissoes = conn.execute(
@@ -139,6 +152,9 @@ def criar_tabelas():
     _garantir_coluna(conn, 'usuarios', 'desativado_em', 'TEXT')
     _garantir_coluna(conn, 'usuarios', 'desativado_por', 'INTEGER')
     _garantir_coluna(conn, 'usuarios', 'atualizado_em', 'TEXT')
+    _garantir_coluna(conn, 'usuarios', 'pode_ver_query', 'INTEGER DEFAULT 0')
+    _garantir_coluna(conn, 'usuarios', 'setor_id', 'INTEGER')
+    _garantir_coluna(conn, 'usuarios', 'is_gerente', 'INTEGER DEFAULT 0')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_usuarios_usuario ON usuarios(usuario)')
     conn.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_usuarios_email_unique "
@@ -228,6 +244,45 @@ def criar_tabelas():
         'CREATE INDEX IF NOT EXISTS idx_emails_usuarios_log_status '
         'ON emails_usuarios_log(status, atualizado_em)'
     )
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS setores (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT UNIQUE NOT NULL,
+            descricao TEXT,
+            ativo INTEGER DEFAULT 1,
+            criado_em TEXT
+        )
+    ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS setor_permissoes_relatorio (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            setor_id INTEGER NOT NULL,
+            modulo_id TEXT NOT NULL,
+            relatorio_id TEXT NOT NULL,
+            criado_em TEXT,
+            UNIQUE(setor_id, modulo_id, relatorio_id)
+        )
+    ''')
+    conn.execute(
+        'CREATE INDEX IF NOT EXISTS idx_setor_permissoes_setor '
+        'ON setor_permissoes_relatorio(setor_id)'
+    )
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS api_tokens (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            usuario_id INTEGER NOT NULL,
+            nome TEXT NOT NULL,
+            token TEXT UNIQUE NOT NULL,
+            criado_em TEXT,
+            ultimo_uso TEXT,
+            ativo INTEGER DEFAULT 1
+        )
+    ''')
+    conn.execute(
+        'CREATE INDEX IF NOT EXISTS idx_api_tokens_usuario '
+        'ON api_tokens(usuario_id)'
+    )
+    _popular_setores_iniciais(conn)
     _popular_permissoes_iniciais(conn)
     _garantir_admin_inicial(conn)
     conn.commit()

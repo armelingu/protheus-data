@@ -1,0 +1,91 @@
+{% extends "base_auth.html" %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="/statics/css/admin/admin.css">
+{% endblock %}
+
+{% block page_content %}
+<section class="admin-shell">
+    <header class="admin-header">
+        <div class="admin-header-copy">
+            <p class="admin-kicker">Administração</p>
+            <h1>Setores</h1>
+            <p class="admin-subtitulo">Defina os setores da organização, os módulos que cada um pode acessar e quem são os gerentes responsáveis.</p>
+        </div>
+        <nav class="admin-tabs" aria-label="Navegação da administração">
+            <a href="/admin/usuarios"  class="admin-tab">Usuários</a>
+            <a href="/admin/setores"   class="admin-tab ativo">Setores</a>
+            <a href="/admin/auditoria" class="admin-tab">Auditoria</a>
+        </nav>
+    </header>
+
+    <!-- Criar setor -->
+    <section class="admin-panel">
+        <div class="admin-panel-top">
+            <div>
+                <p class="admin-section-kicker">Cadastro</p>
+                <h2>Novo setor</h2>
+            </div>
+            <p class="admin-panel-texto">Defina o nome, uma descrição e quais módulos/relatórios o setor pode acessar.</p>
+        </div>
+
+        <form id="form-criar-setor" class="admin-create-form">
+            <div class="admin-create-row">
+                <label class="admin-field">
+                    <span>Nome do setor</span>
+                    <input type="text" name="nome" placeholder="ex.: Operações" required>
+                </label>
+                <label class="admin-field">
+                    <span>Descrição (opcional)</span>
+                    <input type="text" name="descricao" placeholder="ex.: Setor de operações de voo">
+                </label>
+            </div>
+
+            <div class="admin-permissions-box">
+                <div class="admin-permissions-head">
+                    <span class="admin-section-kicker">Módulos liberados para este setor</span>
+                </div>
+                <div class="admin-permissions-grid" id="novo-setor-permissoes"></div>
+            </div>
+
+            <div class="admin-create-footer">
+                <button type="submit" class="admin-btn admin-btn-primario">Criar setor</button>
+            </div>
+        </form>
+    </section>
+
+    <!-- Lista de setores -->
+    <section class="admin-panel">
+        <div class="admin-panel-top">
+            <div>
+                <p class="admin-section-kicker">Operação</p>
+                <h2>Setores cadastrados</h2>
+            </div>
+            <p class="admin-panel-texto">Clique em "Editar" para ajustar módulos e descrição de cada setor.</p>
+        </div>
+
+        <div class="admin-table">
+            <div class="admin-table-head" style="grid-template-columns: minmax(160px,1.2fr) minmax(0,1.5fr) 80px 80px 90px;">
+                <span>Setor</span>
+                <span>Módulos liberados</span>
+                <span>Gerentes</span>
+                <span>Usuários</span>
+                <span></span>
+            </div>
+            <div id="lista-setores" class="admin-table-body">
+                <p class="admin-vazio">Carregando setores...</p>
+            </div>
+        </div>
+    </section>
+</section>
+
+<div class="toast-area" aria-live="polite" aria-atomic="true">
+    <div class="mensagem" id="mensagem"></div>
+</div>
+
+<script type="application/json" id="admin-relatorios-catalogo">{{ relatorios_catalogo|tojson }}</script>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/statics/js/admin/setores.js"></script>
+{% endblock %}

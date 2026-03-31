@@ -3,7 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ page_title or 'HBR Aviação - Relatórios' }}</title>
+    <title>{{ page_title or 'ProtheusData' }}</title>
+    <link rel="icon" type="image/png" href="/favicon.png">
+    <link rel="shortcut icon" href="/favicon.ico">
     <link rel="stylesheet" href="/statics/css/relatorios/layout.css">
     {% block extra_head %}{% endblock %}
 </head>
@@ -12,7 +14,7 @@
         <aside class="menu-flutuante">
             <div class="menu-painel">
                 <div class="menu-topo">
-                    <p class="menu-marca">HBR Aviação</p>
+                    <p class="menu-marca">ProtheusData</p>
                     <p class="menu-legenda">Central de Relatórios</p>
                 </div>
 
@@ -37,11 +39,23 @@
                     {% endfor %}
                 </nav>
 
+                {% if usuario_atual and (usuario_atual.is_gerente and not usuario_atual.is_admin) %}
+                <section class="menu-modulo">
+                    <p class="menu-modulo-titulo">Gerência</p>
+                    <a href="/gerente" class="menu-link{% if current_path == '/gerente' %} ativo{% endif %}">
+                        Meu Setor
+                    </a>
+                </section>
+                {% endif %}
+
                 {% if usuario_atual and usuario_atual.is_admin %}
                 <section class="menu-modulo">
-                    <p class="menu-modulo-titulo">Você é admin</p>
+                    <p class="menu-modulo-titulo">Administração</p>
                     <a href="/admin/usuarios" class="menu-link{% if current_path == '/admin/usuarios' %} ativo{% endif %}">
                         Usuários
+                    </a>
+                    <a href="/admin/setores" class="menu-link{% if current_path == '/admin/setores' %} ativo{% endif %}">
+                        Setores
                     </a>
                     <a href="/admin/auditoria" class="menu-link{% if current_path == '/admin/auditoria' %} ativo{% endif %}">
                         Auditoria
@@ -49,7 +63,14 @@
                 </section>
                 {% endif %}
 
+                <a href="/meu-perfil" class="menu-link menu-link-perfil{% if current_path == '/meu-perfil' %} ativo{% endif %}" style="margin-top:8px;font-size:.8rem;color:#aaa">
+                    Meu Perfil &amp; Power BI
+                </a>
                 <button type="button" class="menu-sair" data-logout>Sair</button>
+
+                <div class="menu-rodape">
+                    <span>HBR Aviação</span>
+                </div>
             </div>
         </aside>
 

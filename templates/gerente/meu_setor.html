@@ -1,0 +1,66 @@
+{% extends "base_auth.html" %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="/statics/css/admin/admin.css">
+{% endblock %}
+
+{% block page_content %}
+<section class="admin-shell">
+    <header class="admin-header">
+        <div class="admin-header-copy">
+            <p class="admin-kicker">Gerência</p>
+            <h1>{{ setor.nome if setor else 'Meu Setor' }}</h1>
+            <p class="admin-subtitulo">
+                Gerencie as permissões dos usuários do seu setor. Você pode ajustar o acesso somente
+                aos módulos que o setor tem liberado pelo administrador.
+            </p>
+        </div>
+    </header>
+
+    <!-- Painel de módulos do setor -->
+    <section class="admin-panel">
+        <div class="admin-panel-top">
+            <div>
+                <p class="admin-section-kicker">Escopo do setor</p>
+                <h2>Módulos disponíveis</h2>
+            </div>
+            <p class="admin-panel-texto">Estes são os módulos que o administrador liberou para o setor. Você pode distribuir o acesso entre os usuários abaixo.</p>
+        </div>
+        <div id="modulos-setor" class="admin-badges" style="padding:0 0 4px 0">
+            <p class="admin-vazio">Carregando...</p>
+        </div>
+    </section>
+
+    <!-- Lista de usuários -->
+    <section class="admin-panel">
+        <div class="admin-panel-top">
+            <div>
+                <p class="admin-section-kicker">Usuários</p>
+                <h2>Pessoas do setor</h2>
+            </div>
+            <p class="admin-panel-texto">Ative ou remova o acesso a cada relatório por usuário.</p>
+        </div>
+
+        <div class="admin-table">
+            <div class="admin-table-head" style="grid-template-columns: minmax(160px,1.5fr) 1fr 120px;">
+                <span>Usuário</span>
+                <span>Permissões atuais</span>
+                <span></span>
+            </div>
+            <div id="lista-usuarios-setor" class="admin-table-body">
+                <p class="admin-vazio">Carregando usuários do setor...</p>
+            </div>
+        </div>
+    </section>
+</section>
+
+<div class="toast-area" aria-live="polite" aria-atomic="true">
+    <div class="mensagem" id="mensagem"></div>
+</div>
+
+<script type="application/json" id="admin-relatorios-catalogo">{{ relatorios_catalogo|tojson }}</script>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/statics/js/gerente/meu_setor.js"></script>
+{% endblock %}

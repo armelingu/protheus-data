@@ -128,9 +128,8 @@ def consolidar_sync_log():
 
     conn.commit()
     conn.close()
-def _detectar_e_remover_deletados(chaves_protheus, data_corte):
+def _detectar_e_remover_deletados(chaves_protheus, data_corte, conn):
     """Remove do cache local registros que sumiram do Protheus na janela de lookback."""
-    conn = conectar_pedidos()
     locais = conn.execute(
         'SELECT filial, pedido_compra, item FROM pedidos WHERE data_emissao >= ?',
         (data_corte,)
@@ -147,47 +146,54 @@ def _detectar_e_remover_deletados(chaves_protheus, data_corte):
             'DELETE FROM pedidos WHERE filial=? AND pedido_compra=? AND item=?',
             para_deletar
         )
-        conn.commit()
 
-    conn.close()
     return len(para_deletar)
 
 
 def _upsert_no_sqlite(linhas, data_corte=None):
     total_protheus = len(linhas)
 
-    if not linhas:
-        conn = conectar_pedidos()
-        total_local = conn.execute('SELECT COUNT(*) FROM pedidos').fetchone()[0]
+    conn = conectar_pedidos()
+    try:
+        if not linhas:
+            total_local_janela = conn.execute(
+                'SELECT COUNT(*) FROM pedidos WHERE data_emissao >= ?', (data_corte,)
+            ).fetchone()[0] if data_corte else conn.execute(
+                'SELECT COUNT(*) FROM pedidos'
+            ).fetchone()[0]
+            registrar_sync_event(0, 'sem_novos', total_protheus=0, total_local=total_local_janela)
+            return 0
+
+        dados = [
+            tuple(str(val).strip() if val else '' for val in linha)
+            for linha in linhas
+        ]
+        chaves_protheus = {(d[1], d[2], d[3]) for d in dados}
+
+        antes = conn.execute('SELECT COUNT(*) FROM pedidos').fetchone()[0]
+        conn.executemany(INSERT_PEDIDO, dados)
+        depois = conn.execute('SELECT COUNT(*) FROM pedidos').fetchone()[0]
+
+        novos = depois - antes
+
+        removidos = 0
+        if data_corte:
+            removidos = _detectar_e_remover_deletados(chaves_protheus, data_corte, conn)
+
+        conn.commit()
+
+        if data_corte:
+            # Compara apenas dentro da mesma janela que o Protheus retornou
+            total_local_janela = conn.execute(
+                'SELECT COUNT(*) FROM pedidos WHERE data_emissao >= ?', (data_corte,)
+            ).fetchone()[0]
+        else:
+            # Carga completa: total_local deve igualar total_protheus
+            total_local_janela = conn.execute('SELECT COUNT(*) FROM pedidos').fetchone()[0]
+    finally:
         conn.close()
-        registrar_sync_event(0, 'sem_novos', total_protheus=0, total_local=total_local)
-        return 0
 
-    dados = [
-        tuple(str(val).strip() if val else '' for val in linha)
-        for linha in linhas
-    ]
-
-    chaves_protheus = {(d[1], d[2], d[3]) for d in dados}
-
-    conn = conectar_pedidos()
-    antes = conn.execute('SELECT COUNT(*) FROM pedidos').fetchone()[0]
-    conn.executemany(INSERT_PEDIDO, dados)
-    depois = conn.execute('SELECT COUNT(*) FROM pedidos').fetchone()[0]
-    conn.commit()
-    conn.close()
-
-    novos = depois - antes
-
-    removidos = 0
-    if data_corte:
-        removidos = _detectar_e_remover_deletados(chaves_protheus, data_corte)
-
-    conn = conectar_pedidos()
-    total_local = conn.execute('SELECT COUNT(*) FROM pedidos').fetchone()[0]
-    conn.close()
-
-    divergencia = abs(total_protheus - total_local) / max(total_protheus, 1)
+    divergencia = abs(total_protheus - total_local_janela) / max(total_protheus, 1)
     if divergencia > 0.05:
         status = 'alerta'
     elif novos > 0 or removidos > 0:
@@ -199,7 +205,7 @@ def _upsert_no_sqlite(linhas, data_corte=None):
         novos,
         status,
         total_protheus=total_protheus,
-        total_local=total_local,
+        total_local=total_local_janela,
     )
     return novos
 
