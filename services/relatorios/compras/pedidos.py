@@ -128,6 +128,8 @@ def consolidar_sync_log():
 
     conn.commit()
     conn.close()
+
+
 def _detectar_e_remover_deletados(chaves_protheus, data_corte, conn):
     """Remove do cache local registros que sumiram do Protheus na janela de lookback."""
     locais = conn.execute(
