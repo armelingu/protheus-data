@@ -1242,9 +1242,9 @@ def api_admin_configurar_setor(setor_id):
         'UPDATE setores SET nome=?, descricao=?, ativo=? WHERE id=?',
         (nome or setor['nome'], descricao or None, 1 if ativo else 0, setor_id)
     )
+    salvar_permissoes_setor(setor_id, permissoes, conn=conn)
     conn.commit()
     conn.close()
-    salvar_permissoes_setor(setor_id, permissoes)
     registrar_auditoria_admin('setor_atualizado', detalhe=f'Setor id={setor_id} atualizado.')
     return jsonify({'mensagem': 'Setor atualizado com sucesso.'}), 200
 
