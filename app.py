@@ -1,22 +1,25 @@
 import os
 import json
+import re
 import time
 import secrets
 import threading
 from datetime import timedelta
 from functools import wraps
-from flask import Flask, request, jsonify, redirect, render_template, send_from_directory, Response, session, g
+from flask import Flask, request, jsonify, redirect, render_template, send_from_directory, Response, session, g, has_request_context
 from werkzeug.security import check_password_hash, generate_password_hash
 from dotenv import load_dotenv
 from catalogo_relatorios import listar_modulos, listar_relatorios_flat, obter_relatorio, chave_relatorio
 from database import (
     conectar_users,
     conectar_pedidos,
+    conectar_financeiro,
     criar_tabelas,
     limpar_logs_antigos,
     criar_backup_diario,
     agora,
 )
+from services.cache import cache_get, cache_set, cache_namespace
 from services.relatorios.compras.pedidos import (
     QUERY_PEDIDOS,
     consolidar_sync_log as consolidar_sync_log_pedidos,
@@ -28,6 +31,16 @@ from services.relatorios.compras.pedidos import (
     carga_inicial as carga_inicial_pedidos,
     registrar_sync_event as registrar_sync_event_pedidos,
 )
+from services.relatorios.compras.historico_pedidos import (
+    QUERY_HISTORICO_BASE as QUERY_HISTORICO_PEDIDOS,
+    gerar_csv_historico,
+    gerar_excel_historico,
+    info_relatorio_historico,
+    historico_sync_historico,
+    sincronizar_historico,
+    carga_inicial_historico,
+    registrar_sync_event_historico,
+)
 from services.relatorios.estoque.saldos import (
     QUERY_ESTOQUE,
     consolidar_sync_log as consolidar_sync_log_estoque,
@@ -38,6 +51,42 @@ from services.relatorios.estoque.saldos import (
     sincronizar as sincronizar_estoque,
     carga_inicial as carga_inicial_estoque,
     registrar_sync_event as registrar_sync_event_estoque,
+)
+from services.relatorios.financeiro.nf_entrada import (
+    gerar_csv_nf_entrada, gerar_excel_nf_entrada,
+    info_relatorio_nf_entrada, historico_sync_nf_entrada,
+    sincronizar_nf_entrada, carga_inicial_nf_entrada,
+    QUERY_PAGINADA as QUERY_NF_ENTRADA,
+)
+from services.relatorios.financeiro.nf_saida import (
+    gerar_csv_nf_saida, gerar_excel_nf_saida,
+    info_relatorio_nf_saida, historico_sync_nf_saida,
+    sincronizar_nf_saida, carga_inicial_nf_saida,
+    QUERY_PAGINADA as QUERY_NF_SAIDA,
+)
+from services.relatorios.financeiro.contas_receber import (
+    gerar_csv_contas_receber, gerar_excel_contas_receber,
+    info_relatorio_contas_receber, historico_sync_contas_receber,
+    sincronizar_contas_receber, carga_inicial_contas_receber,
+    QUERY_PAGINADA as QUERY_CONTAS_RECEBER,
+)
+from services.relatorios.energy.contas_pagar import (
+    gerar_csv_energy_contas_pagar, gerar_excel_energy_contas_pagar,
+    info_relatorio_energy_contas_pagar, historico_sync_energy_contas_pagar,
+    sincronizar_energy_contas_pagar, carga_inicial_energy_contas_pagar,
+    QUERY_PAGINADA as QUERY_ENERGY_CONTAS_PAGAR,
+)
+from services.relatorios.financeiro.contas_pagar import (
+    gerar_csv_contas_pagar, gerar_excel_contas_pagar,
+    info_relatorio_contas_pagar, historico_sync_contas_pagar,
+    sincronizar_contas_pagar, carga_inicial_contas_pagar,
+    QUERY_PAGINADA as QUERY_CONTAS_PAGAR,
+)
+from services.relatorios.financeiro.mov_bancarios import (
+    gerar_csv_mov_bancarios, gerar_excel_mov_bancarios,
+    info_relatorio_mov_bancarios, historico_sync_mov_bancarios,
+    sincronizar_mov_bancarios, carga_inicial_mov_bancarios,
+    QUERY_PAGINADA as QUERY_MOV_BANCARIOS,
 )
 from services.email_service import montar_email_acesso, enviar_email
 from time_utils import APP_TIMEZONE, agora_sp, parse_db_datetime
@@ -58,15 +107,65 @@ if not _secret_key:
         'Gere uma chave segura e adicione ao .env antes de iniciar.'
     )
 app.secret_key = _secret_key
+app.config['SESSION_COOKIE_NAME'] = 'protheusdata_session'
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['SESSION_COOKIE_SECURE'] = os.getenv('SESSION_COOKIE_SECURE', 'false').lower() == 'true'
-app.config['PERMANENT_SESSION_LIFETIME'] = int(os.getenv('SESSION_LIFETIME_SECONDS', '28800'))  # 8h padrão
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(seconds=int(os.getenv('SESSION_LIFETIME_SECONDS', '604800')))  # 7 dias padrão
+app.config['SESSION_REFRESH_EACH_REQUEST'] = True
+
+# Compressão automática (gzip/deflate/br) negociada via Accept-Encoding.
+# Aplica-se a JSON (OData), HTML, CSV e JS/CSS. Não recomprime XLSX (já zipado).
+# Power BI envia Accept-Encoding: gzip por padrão -> reduz banda OData ~80%.
+app.config['COMPRESS_MIMETYPES'] = [
+    'application/json',
+    'application/json;odata.metadata=minimal',
+    'application/xml',  # OData $metadata
+    'text/html',
+    'text/css',
+    'text/csv',
+    'text/plain',
+    'application/javascript',
+]
+app.config['COMPRESS_LEVEL']    = 6  # padrão; bom equilíbrio CPU x ratio
+app.config['COMPRESS_MIN_SIZE'] = 500  # não comprime payloads minúsculos
+try:
+    from flask_compress import Compress
+    Compress(app)
+except ImportError:
+    print('[WARN] flask_compress não instalado — respostas sairão sem gzip.')
+
+
+@app.before_request
+def renovar_sessao():
+    """Garante que toda requisição autenticada renova o prazo da sessão."""
+    if session.get('usuario_id'):
+        session.permanent = True
+        session.modified = True
+
+
+@app.after_request
+def _no_cache_em_apis(resp):
+    """Impede cache de browser em endpoints de API e telas administrativas.
+
+    Safari/Chrome podem servir respostas em cache para fetch() GET, fazendo
+    a UI mostrar dados velhos após uma mutação (ex.: setor recém-excluído
+    reaparecendo após DELETE). Endpoints de assets estáticos não são afetados.
+    """
+    try:
+        path = request.path or ''
+        if path.startswith('/api/') or path.startswith('/admin/'):
+            resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+            resp.headers['Pragma'] = 'no-cache'
+            resp.headers['Expires'] = '0'
+    except Exception:
+        pass
+    return resp
 
 SYNC_INTERVALO = 3600
 MAX_TENTATIVAS_LOGIN = 5
 BLOQUEIO_MINUTOS = 5
-EMAIL_CORPORATIVO_DOMINIO = 'hbraviacao.com.br'
+EMAIL_CORPORATIVOS_DOMINIOS = ('hbraviacao.com.br', 'hbrenergy.com.br')
 ROTAS_LIBERADAS_TROCA_SENHA = {'/primeiro-acesso', '/api/primeiro-acesso', '/api/logout', '/favicon.ico'}
 
 ultimo_sync_dt = None
@@ -84,23 +183,26 @@ def _json_dump(valor):
 
 def obter_usuario_por_id(usuario_id):
     conn = conectar_users()
-    usuario = conn.execute('SELECT * FROM usuarios WHERE id = ?', (usuario_id,)).fetchone()
-    conn.close()
-    return usuario
+    try:
+        return conn.execute('SELECT * FROM usuarios WHERE id = ?', (usuario_id,)).fetchone()
+    finally:
+        conn.close()
 
 
 def obter_usuario_por_login(login):
     conn = conectar_users()
-    usuario = conn.execute('SELECT * FROM usuarios WHERE usuario = ?', (login,)).fetchone()
-    conn.close()
-    return usuario
+    try:
+        return conn.execute('SELECT * FROM usuarios WHERE usuario = ?', (login,)).fetchone()
+    finally:
+        conn.close()
 
 
 def obter_usuario_por_email(email):
     conn = conectar_users()
-    usuario = conn.execute('SELECT * FROM usuarios WHERE email = ?', (email,)).fetchone()
-    conn.close()
-    return usuario
+    try:
+        return conn.execute('SELECT * FROM usuarios WHERE email = ?', (email,)).fetchone()
+    finally:
+        conn.close()
 
 
 def obter_ultimo_email_usuario(usuario_id):
@@ -125,8 +227,9 @@ def normalizar_email_corporativo(email):
         raise ValueError('Informe um e-mail corporativo válido.')
 
     login, dominio = email_normalizado.split('@', 1)
-    if dominio != EMAIL_CORPORATIVO_DOMINIO:
-        raise ValueError(f'Apenas e-mails @{EMAIL_CORPORATIVO_DOMINIO} são permitidos.')
+    if dominio not in EMAIL_CORPORATIVOS_DOMINIOS:
+        permitidos = ', '.join('@' + d for d in EMAIL_CORPORATIVOS_DOMINIOS)
+        raise ValueError(f'Apenas e-mails corporativos são permitidos ({permitidos}).')
     if not login:
         raise ValueError('O e-mail informado é inválido.')
     return email_normalizado
@@ -142,10 +245,44 @@ def obter_relatorios_catalogo():
 
 
 def obter_chaves_relatorio_validas():
-    return {relatorio['chave'] for relatorio in obter_relatorios_catalogo()}
+    return {relatorio['chave'] for relatorio in listar_relatorios_flat(incluir_admin_only=True)}
+
+
+def _cache_request(chave):
+    """Devolve um dict (cache local do request) ou None se fora do app context.
+
+    Usado para memoizar leituras de permissões dentro do mesmo request HTTP.
+    Em scripts/CLI (sem request ativo) caímos para leitura direta.
+    """
+    try:
+        if not has_request_context():
+            return None
+        if not hasattr(g, '_perm_cache'):
+            g._perm_cache = {}
+        return g._perm_cache.setdefault(chave, {})
+    except Exception:
+        return None
+
+
+_PERM_CACHE_TTL = int(os.getenv('CACHE_PERM_TTL_SECONDS', '30'))
 
 
 def obter_relatorios_permitidos(usuario_id):
+    # 1) Cache intra-request (g) — corta repeticoes dentro de uma mesma chamada
+    cache = _cache_request('usuario')
+    if cache is not None and usuario_id in cache:
+        return cache[usuario_id]
+
+    # 2) Cache cross-request (Redis ou fallback in-memory) — TTL curto
+    chave_externa = f'perm:user:{usuario_id}'
+    valor_ext = cache_get(chave_externa)
+    if valor_ext is not None:
+        resultado = set(valor_ext)
+        if cache is not None:
+            cache[usuario_id] = resultado
+        return resultado
+
+    # 3) Source of truth: SQLite
     conn = conectar_users()
     linhas = conn.execute(
         '''
@@ -156,19 +293,61 @@ def obter_relatorios_permitidos(usuario_id):
         (usuario_id,)
     ).fetchall()
     conn.close()
-    return {chave_relatorio(linha['modulo_id'], linha['relatorio_id']) for linha in linhas}
+    resultado = {chave_relatorio(linha['modulo_id'], linha['relatorio_id']) for linha in linhas}
+
+    cache_set(chave_externa, list(resultado), ttl=_PERM_CACHE_TTL)
+    if cache is not None:
+        cache[usuario_id] = resultado
+    return resultado
 
 
 def obter_relatorios_permitidos_setor(setor_id):
     if not setor_id:
         return None
+
+    cache = _cache_request('setor')
+    if cache is not None and setor_id in cache:
+        return cache[setor_id]
+
+    chave_externa = f'perm:setor:{setor_id}'
+    valor_ext = cache_get(chave_externa)
+    if valor_ext is not None:
+        resultado = set(valor_ext)
+        if cache is not None:
+            cache[setor_id] = resultado
+        return resultado
+
     conn = conectar_users()
     linhas = conn.execute(
         'SELECT modulo_id, relatorio_id FROM setor_permissoes_relatorio WHERE setor_id = ?',
         (setor_id,)
     ).fetchall()
     conn.close()
-    return {chave_relatorio(l['modulo_id'], l['relatorio_id']) for l in linhas}
+    resultado = {chave_relatorio(l['modulo_id'], l['relatorio_id']) for l in linhas}
+
+    cache_set(chave_externa, list(resultado), ttl=_PERM_CACHE_TTL)
+    if cache is not None:
+        cache[setor_id] = resultado
+    return resultado
+
+
+def invalidar_cache_permissoes():
+    """Invalida cache de permissões em todas as camadas.
+
+    Chamar após qualquer escrita em usuario_permissoes_relatorio ou
+    setor_permissoes_relatorio. Invalida tanto o cache intra-request (g) quanto
+    o cache cross-request (Redis/fallback) — propaga para outros workers via
+    Redis quando disponível.
+    """
+    try:
+        if has_request_context() and hasattr(g, '_perm_cache'):
+            g._perm_cache = {}
+    except Exception:
+        pass
+    try:
+        cache_namespace('perm:').invalidate()
+    except Exception:
+        pass
 
 
 def listar_setores(apenas_ativos=True):
@@ -204,8 +383,32 @@ def validar_api_token(token_str):
     if usuario:
         conn.execute('UPDATE api_tokens SET ultimo_uso=? WHERE id=?', (agora(), row['token_id']))
         conn.commit()
+        g.api_token_id = row['token_id']
     conn.close()
     return usuario
+
+
+def obter_permissoes_token(token_id):
+    """Retorna o conjunto de chaves de relatório que o token tem escopo explícito.
+    Retorna None se o token não tem escopos definidos (tokens legados — acesso via permissão do usuário)."""
+    conn = conectar_users()
+    linhas = conn.execute(
+        'SELECT modulo_id, relatorio_id FROM api_token_permissoes WHERE token_id=?',
+        (token_id,)
+    ).fetchall()
+    conn.close()
+    if not linhas:
+        return None
+    return {chave_relatorio(l['modulo_id'], l['relatorio_id']) for l in linhas}
+
+
+def token_tem_acesso_relatorio(token_id, modulo_id, relatorio_id):
+    """Verifica se o token tem escopo explícito para o relatório.
+    Tokens sem nenhum escopo definido são bloqueados por segurança (fail-closed)."""
+    escopos = obter_permissoes_token(token_id)
+    if escopos is None:
+        return False
+    return chave_relatorio(modulo_id, relatorio_id) in escopos
 
 
 def salvar_permissoes_setor(setor_id, permissoes, conn=None):
@@ -232,6 +435,7 @@ def salvar_permissoes_setor(setor_id, permissoes, conn=None):
     if fechar:
         conn.commit()
         conn.close()
+    invalidar_cache_permissoes()
 
 
 def usuario_atual():
@@ -334,36 +538,38 @@ def registrar_auditoria_admin(
     depois=None,
 ):
     conn = conectar_users()
-    conn.execute(
-        '''
-        INSERT INTO auditoria_admin (
-            admin_usuario_id,
-            admin_usuario_nome,
-            acao,
-            usuario_afetado_id,
-            usuario_afetado_login,
-            detalhes_antes,
-            detalhes_depois,
-            detalhe,
-            ip,
-            data_hora
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''',
-        (
-            session.get('usuario_id'),
-            session.get('usuario_nome'),
-            acao,
-            usuario_afetado_id,
-            usuario_afetado_login,
-            _json_dump(antes),
-            _json_dump(depois),
-            detalhe,
-            request.remote_addr,
-            agora(),
+    try:
+        conn.execute(
+            '''
+            INSERT INTO auditoria_admin (
+                admin_usuario_id,
+                admin_usuario_nome,
+                acao,
+                usuario_afetado_id,
+                usuario_afetado_login,
+                detalhes_antes,
+                detalhes_depois,
+                detalhe,
+                ip,
+                data_hora
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''',
+            (
+                session.get('usuario_id'),
+                session.get('usuario_nome'),
+                acao,
+                usuario_afetado_id,
+                usuario_afetado_login,
+                _json_dump(antes),
+                _json_dump(depois),
+                detalhe,
+                request.remote_addr,
+                agora(),
+            )
         )
-    )
-    conn.commit()
-    conn.close()
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def resposta_sem_acesso(mensagem='Você não tem permissão para acessar este conteúdo.'):
@@ -430,6 +636,14 @@ def acesso_relatorio_requerido(modulo_id, relatorio_id):
         @login_requerido
         def wrapper(*args, **kwargs):
             if not usuario_tem_acesso_relatorio(usuario_atual(), modulo_id, relatorio_id):
+                try:
+                    registrar_log(
+                        f'acesso_negado_{modulo_id}_{relatorio_id}',
+                        session.get('usuario_id'),
+                        session.get('usuario_nome'),
+                    )
+                except Exception:
+                    pass
                 return resposta_sem_acesso('Seu usuário não possui permissão para este relatório.')
             return f(*args, **kwargs)
         return wrapper
@@ -471,6 +685,7 @@ def contar_outros_admins_ativos(usuario_id):
 def salvar_permissoes_usuario(conn, usuario_id, permissoes):
     conn.execute('DELETE FROM usuario_permissoes_relatorio WHERE usuario_id = ?', (usuario_id,))
     if not permissoes:
+        invalidar_cache_permissoes()
         return
 
     agora_atual = agora()
@@ -487,6 +702,7 @@ def salvar_permissoes_usuario(conn, usuario_id, permissoes):
         ''',
         valores
     )
+    invalidar_cache_permissoes()
 
 
 def listar_usuarios_admin():
@@ -565,30 +781,49 @@ def listar_usuarios_admin():
     return usuarios_serializados
 
 
-def listar_logs_acesso(limit=80):
+def listar_logs_acesso(limit=500, offset=0, busca=None, acao=None, data_inicio=None, data_fim=None):
     conn = conectar_users()
-    linhas = conn.execute(
-        '''
-        SELECT usuario_nome, acao, ip, data_hora
-        FROM logs_acesso
-        ORDER BY id DESC
-        LIMIT ?
-        ''',
-        (limit,)
-    ).fetchall()
+    sql    = 'SELECT usuario_nome, acao, ip, data_hora FROM logs_acesso WHERE 1=1'
+    params = []
+
+    if busca:
+        sql += ' AND (usuario_nome LIKE ? OR ip LIKE ?)'
+        params += [f'%{busca}%', f'%{busca}%']
+    if acao:
+        sql += ' AND acao = ?'
+        params.append(acao)
+    if data_inicio:
+        sql += ' AND date(data_hora) >= ?'
+        params.append(data_inicio)
+    if data_fim:
+        sql += ' AND date(data_hora) <= ?'
+        params.append(data_fim)
+
+    total = conn.execute(
+        sql.replace('SELECT usuario_nome, acao, ip, data_hora', 'SELECT COUNT(*)'),
+        tuple(params),
+    ).fetchone()[0]
+
+    sql += ' ORDER BY id DESC LIMIT ? OFFSET ?'
+    params += [limit, offset]
+    linhas = conn.execute(sql, tuple(params)).fetchall()
     conn.close()
-    return [
-        {
-            'usuario_nome': linha['usuario_nome'] or 'Sistema',
-            'acao': linha['acao'],
-            'ip': linha['ip'] or '--',
-            'data_hora': serializar_data(linha['data_hora']) or '--',
-        }
-        for linha in linhas
-    ]
+    return {
+        'total': total,
+        'itens': [
+            {
+                'usuario_nome': linha['usuario_nome'] or 'Sistema',
+                'acao': linha['acao'],
+                'ip': linha['ip'] or '--',
+                'data_hora': serializar_data(linha['data_hora']) or '--',
+            }
+            for linha in linhas
+        ],
+    }
 
 
-def listar_auditoria_admin(limit=120, usuario_id=None, acao=None):
+def listar_auditoria_admin(limit=500, offset=0, usuario_id=None, acao=None,
+                           busca=None, data_inicio=None, data_fim=None):
     conn = conectar_users()
     sql = (
         'SELECT admin_usuario_nome, acao, usuario_afetado_login, detalhe, ip, data_hora '
@@ -602,23 +837,43 @@ def listar_auditoria_admin(limit=120, usuario_id=None, acao=None):
     if acao:
         sql += ' AND acao = ?'
         params.append(acao)
+    if busca:
+        sql += ' AND (admin_usuario_nome LIKE ? OR usuario_afetado_login LIKE ? OR detalhe LIKE ?)'
+        params += [f'%{busca}%', f'%{busca}%', f'%{busca}%']
+    if data_inicio:
+        sql += ' AND date(data_hora) >= ?'
+        params.append(data_inicio)
+    if data_fim:
+        sql += ' AND date(data_hora) <= ?'
+        params.append(data_fim)
 
-    sql += ' ORDER BY id DESC LIMIT ?'
-    params.append(limit)
+    total = conn.execute(
+        sql.replace(
+            'SELECT admin_usuario_nome, acao, usuario_afetado_login, detalhe, ip, data_hora',
+            'SELECT COUNT(*)',
+        ),
+        tuple(params),
+    ).fetchone()[0]
+
+    sql += ' ORDER BY id DESC LIMIT ? OFFSET ?'
+    params += [limit, offset]
 
     linhas = conn.execute(sql, tuple(params)).fetchall()
     conn.close()
-    return [
-        {
-            'admin_usuario_nome': linha['admin_usuario_nome'] or 'Sistema',
-            'acao': linha['acao'],
-            'usuario_afetado_login': linha['usuario_afetado_login'] or '--',
-            'detalhe': linha['detalhe'] or '',
-            'ip': linha['ip'] or '--',
-            'data_hora': serializar_data(linha['data_hora']) or '--',
-        }
-        for linha in linhas
-    ]
+    return {
+        'total': total,
+        'itens': [
+            {
+                'admin_usuario_nome': linha['admin_usuario_nome'] or 'Sistema',
+                'acao': linha['acao'],
+                'usuario_afetado_login': linha['usuario_afetado_login'] or '--',
+                'detalhe': linha['detalhe'] or '',
+                'ip': linha['ip'] or '--',
+                'data_hora': serializar_data(linha['data_hora']) or '--',
+            }
+            for linha in linhas
+        ],
+    }
 
 
 def registrar_email_usuario_log(usuario_id, email_destino, payload, resultado):
@@ -819,13 +1074,38 @@ def rotina_sync():
             try:
                 for tentativa in range(1, MAX_TENTATIVAS_SYNC + 1):
                     try:
-                        novos_pedidos = sincronizar_pedidos()
+                        novos_pedidos     = sincronizar_pedidos()
                         alterados_estoque = sincronizar_estoque()
+                        novos_historico   = sincronizar_historico()
+
+                        # Módulo Financeiro — paralelo (cada job tem sua própria
+                        # conexão pyodbc + conexão SQLite; financeiro.db está em
+                        # WAL, suporta leituras/escritas concorrentes).
+                        _fin_syncs = [
+                            ('NF Entrada',           sincronizar_nf_entrada),
+                            ('NF Saída',             sincronizar_nf_saida),
+                            ('Contas a Receber',     sincronizar_contas_receber),
+                            ('Contas a Pagar',       sincronizar_contas_pagar),
+                            ('Movimentos Bancários', sincronizar_mov_bancarios),
+                            ('Energy — Contas a Pagar', sincronizar_energy_contas_pagar),
+                        ]
+                        from concurrent.futures import ThreadPoolExecutor, as_completed
+                        with ThreadPoolExecutor(max_workers=3, thread_name_prefix='fin-sync') as ex:
+                            futs = {ex.submit(_fn_f): _nome_f for _nome_f, _fn_f in _fin_syncs}
+                            for fut in as_completed(futs):
+                                _nome_f = futs[fut]
+                                try:
+                                    _tot_f = fut.result()
+                                    print(f'[SYNC] Financeiro — {_nome_f}: {_tot_f} registro(s) processado(s).')
+                                except Exception as _e_f:
+                                    print(f'[SYNC] Financeiro — {_nome_f}: erro: {_e_f}')
+
                         ultimo_sync_dt = agora_sp()
                         if criar_backup_diario():
                             print('[BACKUP] Backup diário criado com sucesso.')
                         print(f'[SYNC] Pedidos sincronizados. {novos_pedidos} registro(s) novo(s).')
                         print(f'[SYNC] Estoque sincronizado. {alterados_estoque} registro(s) alterado(s).')
+                        print(f'[SYNC] Histórico sincronizado. {novos_historico} registro(s) novo(s).')
                         ultimo_erro = None
                         break
                     except Exception as e:
@@ -840,6 +1120,7 @@ def rotina_sync():
                 if ultimo_erro is not None:
                     registrar_sync_event_pedidos(0, 'erro', str(ultimo_erro)[:180])
                     registrar_sync_event_estoque(0, 'erro', str(ultimo_erro)[:180])
+                    registrar_sync_event_historico(0, 'erro', str(ultimo_erro)[:180])
             finally:
                 sync_lock.release()
     else:
@@ -918,6 +1199,22 @@ def pagina_relatorio_compras_pedidos():
     )
 
 
+@app.route('/relatorios/compras/historico')
+@acesso_relatorio_requerido('compras', 'historico')
+def pagina_relatorio_compras_historico():
+    modulo, relatorio = obter_relatorio('compras', 'historico')
+    usuario = usuario_atual()
+    pode_ver_query = bool(usuario and (usuario['is_admin'] or usuario['pode_ver_query']))
+    return render_template(
+        'relatorios/compras_historico.html',
+        modulo_ativo=modulo,
+        relatorio_ativo=relatorio,
+        query_preview=QUERY_HISTORICO_PEDIDOS if pode_ver_query else '',
+        pode_ver_query=pode_ver_query,
+        **contexto_auth('ProtheusData - Histórico de Pedidos')
+    )
+
+
 @app.route('/relatorios/estoque/saldos')
 @acesso_relatorio_requerido('estoque', 'saldos')
 def pagina_relatorio_estoque_saldos():
@@ -981,16 +1278,41 @@ def pagina_gerente():
 
 # ── Perfil / Tokens de API ───────────────────────────────────────────────────
 
+# Mapa declarativo: todos os relatórios expostos via OData/Power BI.
+# Cada entrada vira: (a) checkbox de escopo na criação de token,
+# (b) linha na lista de endpoints disponíveis,
+# (c) URL "pronta para copiar" ao gerar um token.
+ENDPOINTS_POWER_BI = [
+    {'chave': 'compras.pedidos',         'tag': 'Pedidos',          'titulo': 'Pedidos de Compra',     'url_path': '/odata/pedidos'},
+    {'chave': 'compras.historico',       'tag': 'Histórico',        'titulo': 'Histórico de Pedidos',  'url_path': '/odata/historico-pedidos'},
+    {'chave': 'estoque.saldos',          'tag': 'Estoque',          'titulo': 'Saldo em Estoque',      'url_path': '/odata/estoque'},
+    {'chave': 'financeiro.nf_entrada',   'tag': 'NF Entrada',       'titulo': 'NF de Entrada',         'url_path': '/odata/nf-entrada'},
+    {'chave': 'financeiro.nf_saida',     'tag': 'NF Saída',         'titulo': 'NF de Saída',           'url_path': '/odata/nf-saida'},
+    {'chave': 'financeiro.contas_receber','tag': 'Contas a Receber','titulo': 'Contas a Receber',      'url_path': '/odata/contas-receber'},
+    {'chave': 'financeiro.contas_pagar', 'tag': 'Contas a Pagar',   'titulo': 'Contas a Pagar',        'url_path': '/odata/contas-pagar'},
+    {'chave': 'financeiro.mov_bancarios','tag': 'Mov. Bancários',   'titulo': 'Movimentos Bancários',  'url_path': '/odata/mov-bancarios'},
+    {'chave': 'energy.contas_pagar',     'tag': 'Energy CP',        'titulo': 'Energy — Contas a Pagar', 'url_path': '/odata/energy-contas-pagar'},
+]
+
+
+def endpoints_power_bi_do_usuario(usuario):
+    """Retorna somente os endpoints do catálogo OData que o usuário tem permissão."""
+    disponiveis = []
+    for endpoint in ENDPOINTS_POWER_BI:
+        modulo_id, relatorio_id = endpoint['chave'].split('.', 1)
+        if usuario_tem_acesso_relatorio(usuario, modulo_id, relatorio_id):
+            disponiveis.append(endpoint)
+    return disponiveis
+
+
 @app.route('/meu-perfil')
 @login_requerido
 def pagina_perfil():
     usuario = usuario_atual()
-    pode_pedidos = usuario_tem_acesso_relatorio(usuario, 'compras', 'pedidos')
-    pode_estoque = usuario_tem_acesso_relatorio(usuario, 'estoque', 'saldos')
+    endpoints_pbi = endpoints_power_bi_do_usuario(usuario)
     return render_template(
         'perfil/index.html',
-        pode_pedidos=pode_pedidos,
-        pode_estoque=pode_estoque,
+        endpoints_pbi=endpoints_pbi,
         **contexto_auth('ProtheusData - Meu Perfil')
     )
 
@@ -1005,11 +1327,29 @@ def api_listar_tokens():
         'WHERE usuario_id=? AND ativo=1 ORDER BY criado_em DESC',
         (uid,)
     ).fetchall()
+    escopos = conn.execute(
+        'SELECT p.token_id, p.modulo_id, p.relatorio_id '
+        'FROM api_token_permissoes p '
+        'INNER JOIN api_tokens t ON t.id = p.token_id '
+        'WHERE t.usuario_id=? AND t.ativo=1',
+        (uid,)
+    ).fetchall()
     conn.close()
+
+    escopos_por_token = {}
+    for e in escopos:
+        escopos_por_token.setdefault(e['token_id'], []).append(
+            chave_relatorio(e['modulo_id'], e['relatorio_id'])
+        )
+
     return jsonify({'tokens': [
-        {'id': t['id'], 'nome': t['nome'],
-         'criado_em': serializar_data(t['criado_em']),
-         'ultimo_uso': serializar_data(t['ultimo_uso']) or 'Nunca utilizado'}
+        {
+            'id': t['id'],
+            'nome': t['nome'],
+            'criado_em': serializar_data(t['criado_em']),
+            'ultimo_uso': serializar_data(t['ultimo_uso']) or 'Nunca utilizado',
+            'permissoes': sorted(escopos_por_token.get(t['id'], [])),
+        }
         for t in tokens
     ]})
 
@@ -1019,9 +1359,36 @@ def api_listar_tokens():
 def api_criar_token():
     dados = request.get_json() or {}
     nome = (dados.get('nome') or '').strip()
+    permissoes = set(dados.get('permissoes') or [])
+
     if not nome:
         return jsonify({'erro': 'Informe um nome para identificar o token.'}), 400
+    if not permissoes:
+        return jsonify({'erro': 'Selecione pelo menos um relatório para o token.'}), 400
+
+    relatorios_validos = obter_chaves_relatorio_validas()
+    if permissoes - relatorios_validos:
+        return jsonify({'erro': 'Há relatórios inválidos na seleção.'}), 400
+
     uid = session['usuario_id']
+    usuario = obter_usuario_por_id(uid)
+
+    # Garante que o usuário só pode conceder escopos que ele próprio tem acesso
+    permissoes_usuario = obter_relatorios_permitidos(uid) if not usuario['is_admin'] else relatorios_validos
+    nao_autorizadas = permissoes - permissoes_usuario
+    if nao_autorizadas:
+        registrar_auditoria_admin(
+            'token_escalada_rejeitada',
+            usuario_afetado_id=uid,
+            usuario_afetado_login=usuario['usuario'] if usuario else None,
+            detalhe=(
+                f'Tentativa de criar token "{nome}" com escopos fora das permissões do usuário: '
+                f'{sorted(nao_autorizadas)}'
+            ),
+        )
+        registrar_log('token_escalada_rejeitada', uid, session.get('usuario_nome'))
+        return jsonify({'erro': 'Você não tem permissão para um ou mais relatórios selecionados.'}), 403
+
     conn = conectar_users()
     total = conn.execute(
         'SELECT COUNT(*) FROM api_tokens WHERE usuario_id=? AND ativo=1', (uid,)
@@ -1029,13 +1396,30 @@ def api_criar_token():
     if total >= 5:
         conn.close()
         return jsonify({'erro': 'Limite de 5 tokens ativos por usuário atingido. Revogue um antes de criar novo.'}), 409
+
     token = secrets.token_urlsafe(32)
-    conn.execute(
+    cursor = conn.execute(
         'INSERT INTO api_tokens (usuario_id, nome, token, criado_em, ativo) VALUES (?,?,?,?,1)',
         (uid, nome, token, agora())
     )
+    novo_token_id = cursor.lastrowid
+    for chave in permissoes:
+        modulo_id, relatorio_id = chave.split('.', 1)
+        conn.execute(
+            'INSERT INTO api_token_permissoes (token_id, modulo_id, relatorio_id) VALUES (?,?,?)',
+            (novo_token_id, modulo_id, relatorio_id)
+        )
     conn.commit()
     conn.close()
+
+    registrar_auditoria_admin(
+        'token_criado',
+        usuario_afetado_id=uid,
+        usuario_afetado_login=usuario['usuario'] if usuario else None,
+        detalhe=f'Token OData "{nome}" (id={novo_token_id}) criado com escopos {sorted(permissoes)}.',
+    )
+    registrar_log('token_criado', uid, session.get('usuario_nome'))
+
     return jsonify({'mensagem': f'Token "{nome}" criado.', 'token': token}), 201
 
 
@@ -1044,15 +1428,337 @@ def api_criar_token():
 def api_revogar_token(token_id):
     uid = session['usuario_id']
     conn = conectar_users()
+    info = conn.execute(
+        'SELECT nome, ativo FROM api_tokens WHERE id=? AND usuario_id=?',
+        (token_id, uid)
+    ).fetchone()
+    if not info:
+        conn.close()
+        return jsonify({'erro': 'Token não encontrado.'}), 404
+
     conn.execute(
         'UPDATE api_tokens SET ativo=0 WHERE id=? AND usuario_id=?', (token_id, uid)
     )
+    conn.execute(
+        'DELETE FROM api_token_permissoes WHERE token_id=? AND token_id IN '
+        '(SELECT id FROM api_tokens WHERE usuario_id=?)',
+        (token_id, uid)
+    )
     conn.commit()
     conn.close()
+
+    usuario = obter_usuario_por_id(uid)
+    registrar_auditoria_admin(
+        'token_revogado',
+        usuario_afetado_id=uid,
+        usuario_afetado_login=usuario['usuario'] if usuario else None,
+        detalhe=f'Token OData "{info["nome"]}" (id={token_id}) revogado (estava ativo={info["ativo"]}).',
+    )
+    registrar_log('token_revogado', uid, session.get('usuario_nome'))
+
     return jsonify({'mensagem': 'Token revogado com sucesso.'}), 200
 
 
 # ── OData endpoints (Power BI / Excel) ───────────────────────────────────────
+
+# ═════════════════════════════════════════════════════════════════════════════
+#                     OData v4 — Integração com Power BI
+# ═════════════════════════════════════════════════════════════════════════════
+# Todos os endpoints espelham 1:1 as colunas exportadas pelos downloads (CSV/Excel)
+# de cada relatório. Paginação server-side via $top, $skip e $count.
+# Autenticação: Bearer token (header Authorization ou query ?token=) + escopo
+# explícito por relatório na tabela api_token_permissoes (fail-closed).
+
+ODATA_MAX_PAGE_SIZE = 10000  # Power BI segue @odata.nextLink; páginas menores reduzem pico de RAM e latência por request.
+
+
+_ODATA_METADATA_XML = '''<?xml version="1.0" encoding="utf-8"?>
+<edmx:Edmx Version="4.0" xmlns:edmx="http://docs.oasis-open.org/odata/ns/edmx">
+  <edmx:DataServices>
+    <Schema Namespace="ProtheusData" xmlns="http://docs.oasis-open.org/odata/ns/edm">
+
+      <!-- ─── Compras ─────────────────────────────────────────────────────── -->
+      <EntityType Name="Pedido">
+        <Key>
+          <PropertyRef Name="filial"/>
+          <PropertyRef Name="pedido_compra"/>
+          <PropertyRef Name="item"/>
+          <PropertyRef Name="nivel_aprovacao"/>
+        </Key>
+        <Property Name="usuario"           Type="Edm.String"/>
+        <Property Name="filial"            Type="Edm.String" Nullable="false"/>
+        <Property Name="pedido_compra"     Type="Edm.String" Nullable="false"/>
+        <Property Name="item"              Type="Edm.String" Nullable="false"/>
+        <Property Name="produto"           Type="Edm.String"/>
+        <Property Name="unidade"           Type="Edm.String"/>
+        <Property Name="descricao_produto" Type="Edm.String"/>
+        <Property Name="quantidade"        Type="Edm.String"/>
+        <Property Name="preco_unitario"    Type="Edm.String"/>
+        <Property Name="preco_total"       Type="Edm.String"/>
+        <Property Name="data_entrega"      Type="Edm.String"/>
+        <Property Name="numero_sc"         Type="Edm.String"/>
+        <Property Name="item_sc"           Type="Edm.String"/>
+        <Property Name="observacoes"       Type="Edm.String"/>
+        <Property Name="classe_valor"      Type="Edm.String"/>
+        <Property Name="qtd_entregue"      Type="Edm.String"/>
+        <Property Name="num_cotacao"       Type="Edm.String"/>
+        <Property Name="moeda"             Type="Edm.String"/>
+        <Property Name="cod_fornecedor"    Type="Edm.String"/>
+        <Property Name="fornecedor"        Type="Edm.String"/>
+        <Property Name="deposito_estoque"  Type="Edm.String"/>
+        <Property Name="data_emissao"      Type="Edm.String"/>
+        <Property Name="nivel_aprovacao"   Type="Edm.String" Nullable="false"/>
+        <Property Name="aprovador"         Type="Edm.String"/>
+        <Property Name="data_aprovacao"    Type="Edm.String"/>
+        <Property Name="status_aprovacao"  Type="Edm.String"/>
+      </EntityType>
+
+      <EntityType Name="HistoricoPedido">
+        <Key>
+          <PropertyRef Name="filial"/>
+          <PropertyRef Name="pedido_compra"/>
+          <PropertyRef Name="item"/>
+        </Key>
+        <Property Name="usuario"           Type="Edm.String"/>
+        <Property Name="filial"            Type="Edm.String" Nullable="false"/>
+        <Property Name="pedido_compra"     Type="Edm.String" Nullable="false"/>
+        <Property Name="item"              Type="Edm.String" Nullable="false"/>
+        <Property Name="produto"           Type="Edm.String"/>
+        <Property Name="descricao_produto" Type="Edm.String"/>
+        <Property Name="quantidade"        Type="Edm.String"/>
+        <Property Name="cod_fornecedor"    Type="Edm.String"/>
+        <Property Name="fornecedor"        Type="Edm.String"/>
+        <Property Name="deposito_estoque"  Type="Edm.String"/>
+        <Property Name="data_emissao"      Type="Edm.String"/>
+      </EntityType>
+
+      <!-- ─── Estoque ─────────────────────────────────────────────────────── -->
+      <EntityType Name="EstoqueSaldo">
+        <Key>
+          <PropertyRef Name="filial"/>
+          <PropertyRef Name="armazem"/>
+          <PropertyRef Name="produto"/>
+        </Key>
+        <Property Name="produto"             Type="Edm.String" Nullable="false"/>
+        <Property Name="filial"              Type="Edm.String" Nullable="false"/>
+        <Property Name="armazem"             Type="Edm.String" Nullable="false"/>
+        <Property Name="saldo_atual"         Type="Edm.Decimal" Precision="18" Scale="4"/>
+        <Property Name="qtde_pedidos_venda"  Type="Edm.Decimal" Precision="18" Scale="4"/>
+        <Property Name="qtde_reserva"        Type="Edm.Decimal" Precision="18" Scale="4"/>
+        <Property Name="saldo_disponivel"    Type="Edm.Decimal" Precision="18" Scale="4"/>
+      </EntityType>
+
+      <!-- ─── Financeiro — NF de Entrada (SD1010) ─────────────────────────── -->
+      <EntityType Name="NFEntrada">
+        <Key><PropertyRef Name="recno"/></Key>
+        <Property Name="recno"      Type="Edm.Int64" Nullable="false"/>
+        <Property Name="D1_FILIAL"  Type="Edm.String"/>
+        <Property Name="D1_DOC"     Type="Edm.String"/>
+        <Property Name="D1_SERIE"   Type="Edm.String"/>
+        <Property Name="D1_ITEM"    Type="Edm.String"/>
+        <Property Name="D1_FORNECE" Type="Edm.String"/>
+        <Property Name="D1_LOJA"    Type="Edm.String"/>
+        <Property Name="D1_EMISSAO" Type="Edm.String"/>
+        <Property Name="D1_DTDIGIT" Type="Edm.String"/>
+        <Property Name="D1_COD"     Type="Edm.String"/>
+        <Property Name="D1_DESC"    Type="Edm.String"/>
+        <Property Name="D1_UM"      Type="Edm.String"/>
+        <Property Name="D1_QUANT"   Type="Edm.Decimal" Precision="18" Scale="4"/>
+        <Property Name="D1_VUNIT"   Type="Edm.Decimal" Precision="18" Scale="6"/>
+        <Property Name="D1_TOTAL"   Type="Edm.Decimal" Precision="18" Scale="2"/>
+        <Property Name="D1_VALIPI"  Type="Edm.Decimal" Precision="18" Scale="2"/>
+        <Property Name="D1_IPI"     Type="Edm.Decimal" Precision="18" Scale="4"/>
+        <Property Name="D1_VALICM"  Type="Edm.Decimal" Precision="18" Scale="2"/>
+        <Property Name="D1_PICM"    Type="Edm.Decimal" Precision="18" Scale="4"/>
+        <Property Name="D1_TP"      Type="Edm.String"/>
+        <Property Name="D1_TES"     Type="Edm.String"/>
+        <Property Name="D1_CF"      Type="Edm.String"/>
+        <Property Name="D1_GRUPO"   Type="Edm.String"/>
+        <Property Name="D1_LOCAL"   Type="Edm.String"/>
+        <Property Name="D1_PEDIDO"  Type="Edm.String"/>
+        <Property Name="D1_ITEMPC"  Type="Edm.String"/>
+        <Property Name="D1_VALDESC" Type="Edm.Decimal" Precision="18" Scale="2"/>
+        <Property Name="D1_PESO"    Type="Edm.Decimal" Precision="18" Scale="4"/>
+      </EntityType>
+
+      <!-- ─── Financeiro — NF de Saída (SD2010) ───────────────────────────── -->
+      <EntityType Name="NFSaida">
+        <Key><PropertyRef Name="recno"/></Key>
+        <Property Name="recno"      Type="Edm.Int64" Nullable="false"/>
+        <Property Name="D2_FILIAL"  Type="Edm.String"/>
+        <Property Name="D2_DOC"     Type="Edm.String"/>
+        <Property Name="D2_SERIE"   Type="Edm.String"/>
+        <Property Name="D2_ITEM"    Type="Edm.String"/>
+        <Property Name="D2_CLIENTE" Type="Edm.String"/>
+        <Property Name="D2_LOJA"    Type="Edm.String"/>
+        <Property Name="D2_EMISSAO" Type="Edm.String"/>
+        <Property Name="D2_DTDIGIT" Type="Edm.String"/>
+        <Property Name="D2_COD"     Type="Edm.String"/>
+        <Property Name="D2_DESC"    Type="Edm.String"/>
+        <Property Name="D2_UM"      Type="Edm.String"/>
+        <Property Name="D2_QUANT"   Type="Edm.Decimal" Precision="18" Scale="4"/>
+        <Property Name="D2_PRUNIT"  Type="Edm.Decimal" Precision="18" Scale="6"/>
+        <Property Name="D2_PRCVEN"  Type="Edm.Decimal" Precision="18" Scale="6"/>
+        <Property Name="D2_VALIPI"  Type="Edm.Decimal" Precision="18" Scale="2"/>
+        <Property Name="D2_IPI"     Type="Edm.Decimal" Precision="18" Scale="4"/>
+        <Property Name="D2_VALICM"  Type="Edm.Decimal" Precision="18" Scale="2"/>
+        <Property Name="D2_PICM"    Type="Edm.Decimal" Precision="18" Scale="4"/>
+        <Property Name="D2_TP"      Type="Edm.String"/>
+        <Property Name="D2_TES"     Type="Edm.String"/>
+        <Property Name="D2_CF"      Type="Edm.String"/>
+        <Property Name="D2_GRUPO"   Type="Edm.String"/>
+        <Property Name="D2_LOCAL"   Type="Edm.String"/>
+        <Property Name="D2_PEDIDO"  Type="Edm.String"/>
+        <Property Name="D2_ITEMPV"  Type="Edm.String"/>
+        <Property Name="D2_DESCON"  Type="Edm.Decimal" Precision="18" Scale="2"/>
+        <Property Name="D2_TIPO"    Type="Edm.String"/>
+      </EntityType>
+
+      <!-- ─── Financeiro — Contas a Receber (SE1010) ──────────────────────── -->
+      <EntityType Name="ContasReceber">
+        <Key><PropertyRef Name="recno"/></Key>
+        <Property Name="recno"       Type="Edm.Int64" Nullable="false"/>
+        <Property Name="E1_FILIAL"   Type="Edm.String"/>
+        <Property Name="E1_PREFIXO"  Type="Edm.String"/>
+        <Property Name="E1_NUM"      Type="Edm.String"/>
+        <Property Name="E1_PARCELA"  Type="Edm.String"/>
+        <Property Name="E1_TIPO"     Type="Edm.String"/>
+        <Property Name="E1_CLIENTE"  Type="Edm.String"/>
+        <Property Name="E1_LOJA"     Type="Edm.String"/>
+        <Property Name="E1_NOMCLI"   Type="Edm.String"/>
+        <Property Name="E1_EMISSAO"  Type="Edm.String"/>
+        <Property Name="E1_VENCTO"   Type="Edm.String"/>
+        <Property Name="E1_VENCREA"  Type="Edm.String"/>
+        <Property Name="E1_VALOR"    Type="Edm.Decimal" Precision="18" Scale="2"/>
+        <Property Name="E1_SALDO"    Type="Edm.Decimal" Precision="18" Scale="2"/>
+        <Property Name="E1_BAIXA"    Type="Edm.String"/>
+        <Property Name="E1_NATUREZ"  Type="Edm.String"/>
+        <Property Name="E1_HIST"     Type="Edm.String"/>
+        <Property Name="E1_STATUS"   Type="Edm.String"/>
+        <Property Name="E1_SITUACA"  Type="Edm.String"/>
+        <Property Name="E1_MOEDA"    Type="Edm.String"/>
+        <Property Name="E1_PORTADO"  Type="Edm.String"/>
+        <Property Name="E1_AGEDEP"   Type="Edm.String"/>
+        <Property Name="E1_NUMNOTA"  Type="Edm.String"/>
+        <Property Name="E1_SERIE"    Type="Edm.String"/>
+        <Property Name="E1_MOTIVO"   Type="Edm.String"/>
+      </EntityType>
+
+      <!-- ─── Financeiro — Contas a Pagar (SE2010) ────────────────────────── -->
+      <EntityType Name="ContasPagar">
+        <Key><PropertyRef Name="recno"/></Key>
+        <Property Name="recno"       Type="Edm.Int64" Nullable="false"/>
+        <Property Name="E2_FILIAL"   Type="Edm.String"/>
+        <Property Name="E2_PREFIXO"  Type="Edm.String"/>
+        <Property Name="E2_NUM"      Type="Edm.String"/>
+        <Property Name="E2_PARCELA"  Type="Edm.String"/>
+        <Property Name="E2_TIPO"     Type="Edm.String"/>
+        <Property Name="E2_FORNECE"  Type="Edm.String"/>
+        <Property Name="E2_LOJA"     Type="Edm.String"/>
+        <Property Name="E2_NOMFOR"   Type="Edm.String"/>
+        <Property Name="E2_EMISSAO"  Type="Edm.String"/>
+        <Property Name="E2_VENCTO"   Type="Edm.String"/>
+        <Property Name="E2_VENCREA"  Type="Edm.String"/>
+        <Property Name="E2_VALOR"    Type="Edm.Decimal" Precision="18" Scale="2"/>
+        <Property Name="E2_SALDO"    Type="Edm.Decimal" Precision="18" Scale="2"/>
+        <Property Name="E2_BAIXA"    Type="Edm.String"/>
+        <Property Name="E2_NATUREZ"  Type="Edm.String"/>
+        <Property Name="E2_HIST"     Type="Edm.String"/>
+        <Property Name="E2_STATUS"   Type="Edm.String"/>
+        <Property Name="E2_MOEDA"    Type="Edm.String"/>
+        <Property Name="E2_BCOPAG"   Type="Edm.String"/>
+        <Property Name="E2_MOTIVO"   Type="Edm.String"/>
+        <Property Name="E2_RATEIO"   Type="Edm.String"/>
+      </EntityType>
+
+      <!-- ─── Financeiro — Movimentos Bancários (SE5010) ──────────────────── -->
+      <EntityType Name="MovBancario">
+        <Key><PropertyRef Name="recno"/></Key>
+        <Property Name="recno"       Type="Edm.Int64" Nullable="false"/>
+        <Property Name="E5_FILIAL"   Type="Edm.String"/>
+        <Property Name="E5_BANCO"    Type="Edm.String"/>
+        <Property Name="E5_AGENCIA"  Type="Edm.String"/>
+        <Property Name="E5_CONTA"    Type="Edm.String"/>
+        <Property Name="E5_DATA"     Type="Edm.String"/>
+        <Property Name="E5_VALOR"    Type="Edm.Decimal" Precision="18" Scale="2"/>
+        <Property Name="E5_RECPAG"   Type="Edm.String"/>
+        <Property Name="E5_NATUREZ"  Type="Edm.String"/>
+        <Property Name="E5_HISTOR"   Type="Edm.String"/>
+        <Property Name="E5_DOCUMEN"  Type="Edm.String"/>
+        <Property Name="E5_TIPO"     Type="Edm.String"/>
+        <Property Name="E5_TIPOLAN"  Type="Edm.String"/>
+        <Property Name="E5_NUMCHEQ"  Type="Edm.String"/>
+        <Property Name="E5_VENCTO"   Type="Edm.String"/>
+        <Property Name="E5_BENEF"    Type="Edm.String"/>
+        <Property Name="E5_PREFIXO"  Type="Edm.String"/>
+        <Property Name="E5_NUMERO"   Type="Edm.String"/>
+        <Property Name="E5_PARCELA"  Type="Edm.String"/>
+        <Property Name="E5_CLIFOR"   Type="Edm.String"/>
+        <Property Name="E5_LOJA"     Type="Edm.String"/>
+        <Property Name="E5_MOTBX"    Type="Edm.String"/>
+        <Property Name="E5_TIPODOC"  Type="Edm.String"/>
+        <Property Name="E5_DTDIGIT"  Type="Edm.String"/>
+      </EntityType>
+
+      <!-- ─── Energy — Contas a Pagar (subset SE2010 do negócio Energy) ───── -->
+      <!-- Colunas com nomes amigáveis (Filial, Vencimento, ...) preservando os aliases da query original -->
+      <EntityType Name="EnergyContasPagar">
+        <Key><PropertyRef Name="recno"/></Key>
+        <Property Name="recno"               Type="Edm.Int64" Nullable="false"/>
+        <Property Name="Filial"              Type="Edm.String"/>
+        <Property Name="Prefixo"             Type="Edm.String"/>
+        <Property Name="NumeroTitulo"        Type="Edm.String"/>
+        <Property Name="Parcela"             Type="Edm.String"/>
+        <Property Name="Tipo"                Type="Edm.String"/>
+        <Property Name="Natureza"            Type="Edm.String"/>
+        <Property Name="Negocio"             Type="Edm.String"/>
+        <Property Name="Rastreamento"        Type="Edm.String"/>
+        <Property Name="CentroCusto"         Type="Edm.String"/>
+        <Property Name="Fornecedor"          Type="Edm.String"/>
+        <Property Name="Loja"                Type="Edm.String"/>
+        <Property Name="NomeFornecedor"      Type="Edm.String"/>
+        <Property Name="DataEmissao"         Type="Edm.String"/>
+        <Property Name="Vencimento"          Type="Edm.String"/>
+        <Property Name="VencimentoReal"      Type="Edm.String"/>
+        <Property Name="ValorTitulo"         Type="Edm.Decimal" Precision="18" Scale="2"/>
+        <Property Name="ISS"                 Type="Edm.Decimal" Precision="18" Scale="2"/>
+        <Property Name="IRRF"                Type="Edm.Decimal" Precision="18" Scale="2"/>
+        <Property Name="Databaixa"           Type="Edm.String"/>
+        <Property Name="BancoPagamento"      Type="Edm.String"/>
+        <Property Name="DataContabil"        Type="Edm.String"/>
+        <Property Name="Historico"           Type="Edm.String"/>
+        <Property Name="Saldo"               Type="Edm.Decimal" Precision="18" Scale="2"/>
+        <Property Name="Desconto"            Type="Edm.Decimal" Precision="18" Scale="2"/>
+        <Property Name="Multa"               Type="Edm.Decimal" Precision="18" Scale="2"/>
+        <Property Name="Juros"               Type="Edm.Decimal" Precision="18" Scale="2"/>
+        <Property Name="Correcao"            Type="Edm.Decimal" Precision="18" Scale="2"/>
+        <Property Name="ValorLiquidoBaixado" Type="Edm.Decimal" Precision="18" Scale="2"/>
+        <Property Name="VencimentoOriginal"  Type="Edm.String"/>
+        <Property Name="Moeda"               Type="Edm.String"/>
+        <Property Name="VlrEmReal"           Type="Edm.Decimal" Precision="18" Scale="2"/>
+        <Property Name="Acrescimo"           Type="Edm.Decimal" Precision="18" Scale="2"/>
+        <Property Name="DataLiberacao"       Type="Edm.String"/>
+        <Property Name="TaxaMoeda"           Type="Edm.Decimal" Precision="18" Scale="6"/>
+        <Property Name="Decrescimo"          Type="Edm.Decimal" Precision="18" Scale="2"/>
+        <Property Name="FilialOrignal"       Type="Edm.String"/>
+      </EntityType>
+
+      <EntityContainer Name="ProtheusDataService">
+        <EntitySet Name="Pedidos"          EntityType="ProtheusData.Pedido"/>
+        <EntitySet Name="Estoque"          EntityType="ProtheusData.EstoqueSaldo"/>
+        <EntitySet Name="HistoricoPedidos" EntityType="ProtheusData.HistoricoPedido"/>
+        <EntitySet Name="NFEntrada"        EntityType="ProtheusData.NFEntrada"/>
+        <EntitySet Name="NFSaida"          EntityType="ProtheusData.NFSaida"/>
+        <EntitySet Name="ContasReceber"    EntityType="ProtheusData.ContasReceber"/>
+        <EntitySet Name="ContasPagar"      EntityType="ProtheusData.ContasPagar"/>
+        <EntitySet Name="MovBancarios"     EntityType="ProtheusData.MovBancario"/>
+        <EntitySet Name="EnergyContasPagar" EntityType="ProtheusData.EnergyContasPagar"/>
+      </EntityContainer>
+
+    </Schema>
+  </edmx:DataServices>
+</edmx:Edmx>'''
+
 
 def _token_da_request():
     auth = request.headers.get('Authorization', '')
@@ -1061,62 +1767,564 @@ def _token_da_request():
     return request.args.get('token') or ''
 
 
-def _odata_response(entity_name, rows, colunas=None):
-    if colunas:
-        dados = [{c: r[c] for c in colunas if c in r.keys()} for r in rows]
-    else:
-        dados = [dict(r) for r in rows]
+def _odata_error(mensagem, status):
+    return Response(
+        json.dumps({'error': {'code': str(status), 'message': mensagem}}, ensure_ascii=False),
+        status=status,
+        mimetype='application/json',
+        headers={'OData-Version': '4.0'},
+    )
+
+
+def _autorizar_odata(modulo_id, relatorio_id, titulo_relatorio):
+    """Retorna (usuario, None) em caso de sucesso ou (None, Response) com erro OData."""
+    usuario = validar_api_token(_token_da_request())
+    if not usuario:
+        _auditar_odata_rejeitada(
+            modulo_id, relatorio_id,
+            motivo='token_invalido',
+            usuario_id=None, usuario_nome=None,
+        )
+        return None, _odata_error('Token inválido ou expirado.', 401)
+    if not usuario_tem_acesso_relatorio(usuario, modulo_id, relatorio_id):
+        _auditar_odata_rejeitada(
+            modulo_id, relatorio_id,
+            motivo='sem_permissao_usuario',
+            usuario_id=usuario['id'], usuario_nome=usuario['nome'],
+        )
+        return None, _odata_error(f'Sem permissão para o relatório de {titulo_relatorio}.', 403)
+    if not token_tem_acesso_relatorio(g.api_token_id, modulo_id, relatorio_id):
+        _auditar_odata_rejeitada(
+            modulo_id, relatorio_id,
+            motivo='token_sem_escopo',
+            usuario_id=usuario['id'], usuario_nome=usuario['nome'],
+        )
+        return None, _odata_error(
+            f'Este token não tem escopo para o relatório de {titulo_relatorio}.', 403,
+        )
+    return usuario, None
+
+
+def _auditar_odata_rejeitada(modulo_id, relatorio_id, motivo, usuario_id=None, usuario_nome=None):
+    """Registra tentativas rejeitadas de acesso a endpoints OData.
+    Importante para detectar brute force, token vazado, ou permissão revogada."""
+    try:
+        acao = f'odata_rejeitada_{motivo}_{modulo_id}_{relatorio_id}'
+        conn = conectar_users()
+        conn.execute(
+            'INSERT INTO logs_acesso (usuario_id, usuario_nome, acao, ip, data_hora) '
+            'VALUES (?, ?, ?, ?, ?)',
+            (usuario_id, usuario_nome, acao, request.remote_addr, agora())
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+def _parse_int_param(nome, default=None, minimo=None, maximo=None):
+    bruto = request.args.get(nome)
+    if bruto is None or bruto == '':
+        return default
+    try:
+        valor = int(bruto)
+    except (TypeError, ValueError):
+        return default
+    if minimo is not None and valor < minimo:
+        valor = minimo
+    if maximo is not None and valor > maximo:
+        valor = maximo
+    return valor
+
+
+def _parse_bool_param(nome, default=False):
+    bruto = (request.args.get(nome) or '').strip().lower()
+    if not bruto:
+        return default
+    return bruto in ('true', '1', 'yes')
+
+
+def _converter_valor_odata(valor):
+    """Normaliza o valor para serialização JSON compatível com o EDMX.
+    Datas/strings vêm como str; decimais/floats como número; None permanece None.
+    """
+    if valor is None:
+        return None
+    if isinstance(valor, (int, float)):
+        return valor
+    if isinstance(valor, str):
+        return valor.strip()
+    return str(valor)
+
+
+_ODATA_OPERADORES = {
+    'eq': '=', 'ne': '<>', 'gt': '>', 'ge': '>=', 'lt': '<', 'le': '<=',
+}
+# Cada cláusula é: identifier OP literal[ ('and'|'or') identifier OP literal]*
+# Identifier deve estar na whitelist de colunas. Literal é string ou número.
+# Nada de funções, parênteses aninhados ou sub-queries.
+_ODATA_COMPARACAO_RE = re.compile(
+    r"(?P<col>[A-Za-z_][A-Za-z0-9_]*)\s+"
+    r"(?P<op>eq|ne|ge|gt|le|lt)\s+"
+    r"(?P<lit>'(?:[^']|'')*'|-?\d+(?:\.\d+)?)",
+    re.IGNORECASE,
+)
+_ODATA_LIGADOR_RE = re.compile(r"\s+(and|or)\s+", re.IGNORECASE)
+
+
+def _parse_odata_filter(filtro_raw, colunas_validas):
+    """Converte um $filter OData mínimo em (WHERE-clause, params) seguro.
+
+    Suporte intencional (whitelist):
+      - operadores: eq, ne, ge, gt, le, lt
+      - combinadores: and, or (sem parênteses)
+      - identificadores: apenas os que estão em `colunas_validas`
+      - literais: string entre aspas simples ('texto' / 'data''escapada') ou
+        número (int/float)
+
+    Tudo o que NÃO casa exatamente com o gramatical é rejeitado com ValueError.
+    Os literais sempre vão como bind parameter (`?`); colunas são validadas
+    contra a whitelist (não vão por bind, mas estão em set fechado).
+    """
+    if not filtro_raw:
+        return '', []
+    filtro = filtro_raw.strip()
+    if not filtro:
+        return '', []
+    if len(filtro) > 1000:
+        raise ValueError('$filter muito grande')
+
+    pedacos = []
+    posicao = 0
+    primeira = True
+
+    while posicao < len(filtro):
+        m = _ODATA_COMPARACAO_RE.match(filtro, posicao)
+        if not m:
+            raise ValueError(f'$filter mal formado em "{filtro[posicao:posicao+40]}"')
+        col = m.group('col')
+        if col not in colunas_validas:
+            raise ValueError(f'$filter: coluna desconhecida "{col}"')
+        op_sql = _ODATA_OPERADORES[m.group('op').lower()]
+        literal = m.group('lit')
+        if literal.startswith("'"):
+            valor = literal[1:-1].replace("''", "'")
+        else:
+            valor = float(literal) if '.' in literal else int(literal)
+        if primeira:
+            pedacos.append(f'{col} {op_sql} ?')
+            primeira = False
+        else:
+            # Já consumimos um ligador antes desse match
+            pedacos[-1] = f'{pedacos[-1]} {col} {op_sql} ?'  # nunca chega aqui
+        posicao = m.end()
+
+        # Próximo: ligador and/or, ou fim
+        if posicao >= len(filtro):
+            break
+        m_lig = _ODATA_LIGADOR_RE.match(filtro, posicao)
+        if not m_lig:
+            raise ValueError(f'$filter: esperado AND/OR após "{filtro[:posicao]}"')
+        pedacos.append(m_lig.group(1).upper())
+        posicao = m_lig.end()
+        primeira = True  # próxima iteração começa um novo termo
+
+    # Reconstrói WHERE: comparações e ligadores intercalados
+    # A lista pedacos contém: comp, lig, comp, lig, comp, ...
+    where = ' '.join(pedacos)
+    # extrai params na mesma ordem das comparações
+    params = []
+    for m in _ODATA_COMPARACAO_RE.finditer(filtro):
+        literal = m.group('lit')
+        if literal.startswith("'"):
+            params.append(literal[1:-1].replace("''", "'"))
+        else:
+            params.append(float(literal) if '.' in literal else int(literal))
+    return where, params
+
+
+def _odata_paged_response(
+    entity_name,
+    conectar_fn,
+    tabela,
+    colunas,
+    order_by,
+    url_path,
+):
+    """Executa SELECT paginado no SQLite e devolve o payload OData v4.
+
+    Parâmetros OData suportados: $top, $skip, $count, $filter (whitelist mínima).
+    O limite de página é `ODATA_MAX_PAGE_SIZE`; se `$top` exceder, aplicamos
+    `ODATA_MAX_PAGE_SIZE` e retornamos `@odata.nextLink` automaticamente.
+    O Power BI segue `@odata.nextLink` sem intervenção do usuário.
+    """
+    skip = _parse_int_param('$skip', default=0, minimo=0) or 0
+    top_solicitado = _parse_int_param('$top', default=None, minimo=1)
+    quer_count = _parse_bool_param('$count', default=False)
+
+    filtro_raw = (request.args.get('$filter') or '').strip()
+    try:
+        where_extra, where_params = _parse_odata_filter(filtro_raw, set(colunas))
+    except ValueError as e:
+        return Response(
+            json.dumps({'error': {'code': 'invalid_filter', 'message': str(e)}}),
+            status=400,
+            mimetype='application/json',
+        )
+
+    page_size = (
+        min(top_solicitado, ODATA_MAX_PAGE_SIZE)
+        if top_solicitado is not None
+        else ODATA_MAX_PAGE_SIZE
+    )
+
+    colunas_sql = ', '.join(colunas)
+    where_sql = f' WHERE {where_extra}' if where_extra else ''
+    sql = f'SELECT {colunas_sql} FROM {tabela}{where_sql} ORDER BY {order_by} LIMIT ? OFFSET ?'
+
+    conn = conectar_fn()
+    try:
+        rows = conn.execute(sql, (*where_params, page_size, skip)).fetchall()
+        total = None
+        if quer_count:
+            count_sql = f'SELECT COUNT(*) FROM {tabela}{where_sql}'
+            total = conn.execute(count_sql, where_params).fetchone()[0]
+    finally:
+        conn.close()
+
+    dados = [
+        {coluna: _converter_valor_odata(linha[coluna]) for coluna in colunas}
+        for linha in rows
+    ]
+
+    base = request.url_root.rstrip('/')
     payload = {
-        '@odata.context': request.url_root.rstrip('/') + f'/odata/$metadata#{entity_name}',
-        'value': dados,
+        '@odata.context': f'{base}/odata/$metadata#{entity_name}',
     }
+    if quer_count and total is not None:
+        payload['@odata.count'] = total
+    payload['value'] = dados
+
+    # Paginação server-side: quando cheia uma página, aponta para a próxima.
+    # Respeita o limite máximo solicitado pelo cliente via $top, se houver.
+    retornou_cheia = len(rows) == page_size
+    ainda_pode_paginar = (
+        top_solicitado is None or (skip + len(rows)) < top_solicitado
+    )
+    if retornou_cheia and ainda_pode_paginar:
+        proximo_skip = skip + page_size
+        query = request.args.to_dict(flat=True)
+        query['$skip'] = str(proximo_skip)
+        if top_solicitado is not None:
+            # Reduz o $top restante para não ultrapassar o pedido original.
+            restante = top_solicitado - (skip + len(rows))
+            if restante <= 0:
+                restante = None
+            if restante is not None:
+                query['$top'] = str(restante)
+        # Preserva o token só se veio por query string, nunca por header.
+        if '$count' in query:
+            query.pop('$count', None)  # $count só na primeira página
+        qs = '&'.join(f'{k}={v}' for k, v in query.items())
+        payload['@odata.nextLink'] = f'{base}{url_path}?{qs}' if qs else f'{base}{url_path}'
+
     return Response(
         json.dumps(payload, ensure_ascii=False, default=str),
+        mimetype='application/json;odata.metadata=minimal',
+        headers={'OData-Version': '4.0'},
+    )
+
+
+@app.route('/odata/')
+@app.route('/odata')
+def odata_service_document():
+    """Service document — necessário para o Power BI descobrir os EntitySets."""
+    base = request.url_root.rstrip('/')
+    payload = {
+        '@odata.context': f'{base}/odata/$metadata',
+        'value': [
+            {'name': 'Pedidos',          'kind': 'EntitySet', 'url': 'pedidos'},
+            {'name': 'Estoque',          'kind': 'EntitySet', 'url': 'estoque'},
+            {'name': 'HistoricoPedidos', 'kind': 'EntitySet', 'url': 'historico-pedidos'},
+            {'name': 'NFEntrada',        'kind': 'EntitySet', 'url': 'nf-entrada'},
+            {'name': 'NFSaida',          'kind': 'EntitySet', 'url': 'nf-saida'},
+            {'name': 'ContasReceber',    'kind': 'EntitySet', 'url': 'contas-receber'},
+            {'name': 'ContasPagar',      'kind': 'EntitySet', 'url': 'contas-pagar'},
+            {'name': 'MovBancarios',     'kind': 'EntitySet', 'url': 'mov-bancarios'},
+            {'name': 'EnergyContasPagar','kind': 'EntitySet', 'url': 'energy-contas-pagar'},
+        ],
+    }
+    return Response(
+        json.dumps(payload, ensure_ascii=False),
         mimetype='application/json;odata.metadata=minimal',
         headers={'OData-Version': '4.0'}
     )
 
 
+@app.route('/odata/$metadata')
+def odata_metadata():
+    """Esquema EDMX — o Power BI busca este endpoint antes de carregar os dados."""
+    return Response(
+        _ODATA_METADATA_XML.strip(),
+        mimetype='application/xml',
+        headers={'OData-Version': '4.0'}
+    )
+
+
+# ─── Compras ─────────────────────────────────────────────────────────────────
+
+_ODATA_PEDIDOS_COLUNAS = [
+    'usuario', 'filial', 'pedido_compra', 'item', 'produto', 'unidade',
+    'descricao_produto', 'quantidade', 'preco_unitario', 'preco_total',
+    'data_entrega', 'numero_sc', 'item_sc', 'observacoes', 'classe_valor',
+    'qtd_entregue', 'num_cotacao', 'moeda', 'cod_fornecedor', 'fornecedor',
+    'deposito_estoque', 'data_emissao', 'nivel_aprovacao', 'aprovador',
+    'data_aprovacao', 'status_aprovacao',
+]
+
+
 @app.route('/odata/pedidos')
 def odata_pedidos():
-    usuario = validar_api_token(_token_da_request())
-    if not usuario:
-        return Response(
-            json.dumps({'error': 'Token inválido ou expirado.'}),
-            status=401, mimetype='application/json'
-        )
-    if not usuario_tem_acesso_relatorio(usuario, 'compras', 'pedidos'):
-        return Response(
-            json.dumps({'error': 'Sem permissão para o relatório de Pedidos de Compra.'}),
-            status=403, mimetype='application/json'
-        )
-    conn = conectar_pedidos()
-    rows = conn.execute('SELECT * FROM pedidos ORDER BY data_emissao DESC, pedido_compra').fetchall()
-    conn.close()
-    colunas = ['filial', 'pedido_compra', 'item', 'produto', 'descricao_produto',
-               'quantidade', 'cod_fornecedor', 'fornecedor', 'deposito_estoque', 'data_emissao']
-    return _odata_response('Pedidos', rows, colunas)
+    _, erro = _autorizar_odata('compras', 'pedidos', 'Pedidos de Compra')
+    if erro:
+        return erro
+    return _odata_paged_response(
+        entity_name='Pedidos',
+        conectar_fn=conectar_pedidos,
+        tabela='pedidos',
+        colunas=_ODATA_PEDIDOS_COLUNAS,
+        order_by='data_emissao DESC, pedido_compra, item, nivel_aprovacao',
+        url_path='/odata/pedidos',
+    )
+
+
+_ODATA_HISTORICO_COLUNAS = [
+    'usuario', 'filial', 'pedido_compra', 'item', 'produto',
+    'descricao_produto', 'quantidade', 'cod_fornecedor', 'fornecedor',
+    'deposito_estoque', 'data_emissao',
+]
+
+
+@app.route('/odata/historico-pedidos')
+def odata_historico_pedidos():
+    _, erro = _autorizar_odata('compras', 'historico', 'Histórico de Pedidos')
+    if erro:
+        return erro
+    return _odata_paged_response(
+        entity_name='HistoricoPedidos',
+        conectar_fn=conectar_pedidos,
+        tabela='pedidos_historico',
+        colunas=_ODATA_HISTORICO_COLUNAS,
+        order_by='data_emissao DESC, pedido_compra, item',
+        url_path='/odata/historico-pedidos',
+    )
+
+
+# ─── Estoque ─────────────────────────────────────────────────────────────────
+
+_ODATA_ESTOQUE_COLUNAS = [
+    'produto', 'filial', 'armazem',
+    'saldo_atual', 'qtde_pedidos_venda', 'qtde_reserva', 'saldo_disponivel',
+]
 
 
 @app.route('/odata/estoque')
 def odata_estoque():
-    usuario = validar_api_token(_token_da_request())
-    if not usuario:
-        return Response(
-            json.dumps({'error': 'Token inválido ou expirado.'}),
-            status=401, mimetype='application/json'
-        )
-    if not usuario_tem_acesso_relatorio(usuario, 'estoque', 'saldos'):
-        return Response(
-            json.dumps({'error': 'Sem permissão para o relatório de Estoque.'}),
-            status=403, mimetype='application/json'
-        )
-    conn = conectar_pedidos()
-    rows = conn.execute('SELECT * FROM estoque_saldos ORDER BY produto').fetchall()
-    conn.close()
-    colunas = ['produto', 'descricao_produto', 'filial', 'armazem',
-               'saldo_atual', 'qtde_pedidos_venda', 'qtde_reserva', 'saldo_disponivel']
-    return _odata_response('Estoque', rows, colunas)
+    _, erro = _autorizar_odata('estoque', 'saldos', 'Estoque')
+    if erro:
+        return erro
+    return _odata_paged_response(
+        entity_name='Estoque',
+        conectar_fn=conectar_pedidos,
+        tabela='estoque_saldos',
+        colunas=_ODATA_ESTOQUE_COLUNAS,
+        order_by='filial, armazem, produto',
+        url_path='/odata/estoque',
+    )
+
+
+# ─── Financeiro — NF de Entrada (SD1010) ─────────────────────────────────────
+
+_ODATA_NF_ENTRADA_COLUNAS = [
+    'recno',
+    'D1_FILIAL', 'D1_DOC', 'D1_SERIE', 'D1_ITEM',
+    'D1_FORNECE', 'D1_LOJA',
+    'D1_EMISSAO', 'D1_DTDIGIT',
+    'D1_COD', 'D1_DESC', 'D1_UM',
+    'D1_QUANT', 'D1_VUNIT', 'D1_TOTAL',
+    'D1_VALIPI', 'D1_IPI', 'D1_VALICM', 'D1_PICM',
+    'D1_TP', 'D1_TES', 'D1_CF',
+    'D1_GRUPO', 'D1_LOCAL',
+    'D1_PEDIDO', 'D1_ITEMPC',
+    'D1_VALDESC', 'D1_PESO',
+]
+
+
+@app.route('/odata/nf-entrada')
+def odata_nf_entrada():
+    _, erro = _autorizar_odata('financeiro', 'nf_entrada', 'NF de Entrada')
+    if erro:
+        return erro
+    return _odata_paged_response(
+        entity_name='NFEntrada',
+        conectar_fn=conectar_financeiro,
+        tabela='nf_entrada_itens',
+        colunas=_ODATA_NF_ENTRADA_COLUNAS,
+        order_by='D1_EMISSAO DESC, recno',
+        url_path='/odata/nf-entrada',
+    )
+
+
+# ─── Financeiro — NF de Saída (SD2010) ───────────────────────────────────────
+
+_ODATA_NF_SAIDA_COLUNAS = [
+    'recno',
+    'D2_FILIAL', 'D2_DOC', 'D2_SERIE', 'D2_ITEM',
+    'D2_CLIENTE', 'D2_LOJA',
+    'D2_EMISSAO', 'D2_DTDIGIT',
+    'D2_COD', 'D2_DESC', 'D2_UM',
+    'D2_QUANT', 'D2_PRUNIT', 'D2_PRCVEN',
+    'D2_VALIPI', 'D2_IPI', 'D2_VALICM', 'D2_PICM',
+    'D2_TP', 'D2_TES', 'D2_CF',
+    'D2_GRUPO', 'D2_LOCAL',
+    'D2_PEDIDO', 'D2_ITEMPV',
+    'D2_DESCON', 'D2_TIPO',
+]
+
+
+@app.route('/odata/nf-saida')
+def odata_nf_saida():
+    _, erro = _autorizar_odata('financeiro', 'nf_saida', 'NF de Saída')
+    if erro:
+        return erro
+    return _odata_paged_response(
+        entity_name='NFSaida',
+        conectar_fn=conectar_financeiro,
+        tabela='nf_saida_itens',
+        colunas=_ODATA_NF_SAIDA_COLUNAS,
+        order_by='D2_EMISSAO DESC, recno',
+        url_path='/odata/nf-saida',
+    )
+
+
+# ─── Financeiro — Contas a Receber (SE1010) ──────────────────────────────────
+
+_ODATA_CONTAS_RECEBER_COLUNAS = [
+    'recno',
+    'E1_FILIAL', 'E1_PREFIXO', 'E1_NUM', 'E1_PARCELA', 'E1_TIPO',
+    'E1_CLIENTE', 'E1_LOJA', 'E1_NOMCLI',
+    'E1_EMISSAO', 'E1_VENCTO', 'E1_VENCREA',
+    'E1_VALOR', 'E1_SALDO', 'E1_BAIXA',
+    'E1_NATUREZ', 'E1_HIST',
+    'E1_STATUS', 'E1_SITUACA', 'E1_MOEDA',
+    'E1_PORTADO', 'E1_AGEDEP',
+    'E1_NUMNOTA', 'E1_SERIE', 'E1_MOTIVO',
+]
+
+
+@app.route('/odata/contas-receber')
+def odata_contas_receber():
+    _, erro = _autorizar_odata('financeiro', 'contas_receber', 'Contas a Receber')
+    if erro:
+        return erro
+    return _odata_paged_response(
+        entity_name='ContasReceber',
+        conectar_fn=conectar_financeiro,
+        tabela='contas_receber',
+        colunas=_ODATA_CONTAS_RECEBER_COLUNAS,
+        order_by='E1_VENCTO DESC, recno',
+        url_path='/odata/contas-receber',
+    )
+
+
+# ─── Financeiro — Contas a Pagar (SE2010) ────────────────────────────────────
+
+_ODATA_CONTAS_PAGAR_COLUNAS = [
+    'recno',
+    'E2_FILIAL', 'E2_PREFIXO', 'E2_NUM', 'E2_PARCELA', 'E2_TIPO',
+    'E2_FORNECE', 'E2_LOJA', 'E2_NOMFOR',
+    'E2_EMISSAO', 'E2_VENCTO', 'E2_VENCREA',
+    'E2_VALOR', 'E2_SALDO', 'E2_BAIXA',
+    'E2_NATUREZ', 'E2_HIST',
+    'E2_STATUS', 'E2_MOEDA',
+    'E2_BCOPAG', 'E2_MOTIVO', 'E2_RATEIO',
+]
+
+
+@app.route('/odata/contas-pagar')
+def odata_contas_pagar():
+    _, erro = _autorizar_odata('financeiro', 'contas_pagar', 'Contas a Pagar')
+    if erro:
+        return erro
+    return _odata_paged_response(
+        entity_name='ContasPagar',
+        conectar_fn=conectar_financeiro,
+        tabela='contas_pagar',
+        colunas=_ODATA_CONTAS_PAGAR_COLUNAS,
+        order_by='E2_VENCTO DESC, recno',
+        url_path='/odata/contas-pagar',
+    )
+
+
+# ─── Financeiro — Movimentos Bancários (SE5010) ──────────────────────────────
+
+_ODATA_MOV_BANCARIOS_COLUNAS = [
+    'recno',
+    'E5_FILIAL', 'E5_BANCO', 'E5_AGENCIA', 'E5_CONTA',
+    'E5_DATA', 'E5_VALOR', 'E5_RECPAG',
+    'E5_NATUREZ', 'E5_HISTOR', 'E5_DOCUMEN',
+    'E5_TIPO', 'E5_TIPOLAN', 'E5_NUMCHEQ',
+    'E5_VENCTO', 'E5_BENEF',
+    'E5_PREFIXO', 'E5_NUMERO', 'E5_PARCELA',
+    'E5_CLIFOR', 'E5_LOJA',
+    'E5_MOTBX', 'E5_TIPODOC', 'E5_DTDIGIT',
+]
+
+
+@app.route('/odata/mov-bancarios')
+def odata_mov_bancarios():
+    _, erro = _autorizar_odata('financeiro', 'mov_bancarios', 'Movimentos Bancários')
+    if erro:
+        return erro
+    return _odata_paged_response(
+        entity_name='MovBancarios',
+        conectar_fn=conectar_financeiro,
+        tabela='mov_bancarios',
+        colunas=_ODATA_MOV_BANCARIOS_COLUNAS,
+        order_by='E5_DATA DESC, recno',
+        url_path='/odata/mov-bancarios',
+    )
+
+
+# ─── Energy — Contas a Pagar (subset SE2010 do negócio Energy) ──────────────
+
+_ODATA_ENERGY_CONTAS_PAGAR_COLUNAS = [
+    'recno',
+    'Filial', 'Prefixo', 'NumeroTitulo', 'Parcela', 'Tipo',
+    'Natureza', 'Negocio', 'Rastreamento', 'CentroCusto',
+    'Fornecedor', 'Loja', 'NomeFornecedor',
+    'DataEmissao', 'Vencimento', 'VencimentoReal',
+    'ValorTitulo', 'ISS', 'IRRF', 'Databaixa',
+    'BancoPagamento', 'DataContabil', 'Historico',
+    'Saldo', 'Desconto', 'Multa', 'Juros', 'Correcao',
+    'ValorLiquidoBaixado', 'VencimentoOriginal', 'Moeda', 'VlrEmReal',
+    'Acrescimo', 'DataLiberacao', 'TaxaMoeda', 'Decrescimo', 'FilialOrignal',
+]
+
+
+@app.route('/odata/energy-contas-pagar')
+def odata_energy_contas_pagar():
+    _, erro = _autorizar_odata('energy', 'contas_pagar', 'Energy — Contas a Pagar')
+    if erro:
+        return erro
+    return _odata_paged_response(
+        entity_name='EnergyContasPagar',
+        conectar_fn=conectar_financeiro,
+        tabela='energy_contas_pagar',
+        colunas=_ODATA_ENERGY_CONTAS_PAGAR_COLUNAS,
+        order_by='Vencimento DESC, recno',
+        url_path='/odata/energy-contas-pagar',
+    )
 
 
 # ── API Admin: Setores ────────────────────────────────────────────────────────
@@ -1219,6 +2427,7 @@ def api_admin_excluir_setor(setor_id):
     conn.execute('DELETE FROM setores WHERE id=?', (setor_id,))
     conn.commit()
     conn.close()
+    invalidar_cache_permissoes()
     registrar_auditoria_admin('setor_excluido', detalhe=f'Setor "{setor["nome"]}" excluído.')
     return jsonify({'mensagem': f'Setor "{setor["nome"]}" excluído com sucesso.'}), 200
 
@@ -1321,15 +2530,25 @@ def api_gerente_configurar_usuario(usuario_id):
     if perms_setor is not None and not permissoes.issubset(perms_setor):
         return jsonify({'erro': 'Permissão fora do escopo do setor.'}), 400
 
+    perms_antes = obter_relatorios_permitidos(usuario_id)
+
     conn = conectar_users()
     salvar_permissoes_usuario(conn, usuario_id, permissoes)
     conn.commit()
     conn.close()
+
+    adicionadas = sorted(permissoes - perms_antes)
+    removidas   = sorted(perms_antes - permissoes)
     registrar_auditoria_admin(
         'gerente_atualizou_permissoes',
         usuario_afetado_id=usuario_id,
         usuario_afetado_login=alvo['usuario'],
-        detalhe='Permissões ajustadas pelo gerente do setor.',
+        antes={'permissoes': sorted(perms_antes)},
+        depois={'permissoes': sorted(permissoes)},
+        detalhe=(
+            f'Permissões ajustadas pelo gerente. '
+            f'Adicionadas: {adicionadas or "[]"} | Removidas: {removidas or "[]"}.'
+        ),
     )
     return jsonify({'mensagem': 'Permissões atualizadas.'}), 200
 
@@ -1579,10 +2798,12 @@ def api_historico_sync_estoque():
 @acesso_relatorio_requerido('compras', 'pedidos')
 def api_relatorio_download():
     formato = request.args.get('formato', 'csv').lower()
+    data_inicio = _iso_para_protheus(request.args.get('data_inicio'))
+    data_fim = _iso_para_protheus(request.args.get('data_fim'))
 
     try:
         if formato == 'excel':
-            dados, total = gerar_excel_pedidos()
+            dados, total = gerar_excel_pedidos(data_inicio=data_inicio, data_fim=data_fim)
             registrar_log('download_excel', session.get('usuario_id'), session.get('usuario_nome'))
             registrar_download(formato, total)
             return Response(
@@ -1591,7 +2812,7 @@ def api_relatorio_download():
                 headers={'Content-Disposition': 'attachment; filename=pedidos_compra.xlsx'}
             )
         else:
-            dados, total = gerar_csv_pedidos()
+            dados, total = gerar_csv_pedidos(data_inicio=data_inicio, data_fim=data_fim)
             registrar_log('download_csv', session.get('usuario_id'), session.get('usuario_nome'))
             registrar_download(formato, total)
             return Response(
@@ -1676,10 +2897,466 @@ def api_relatorio_estoque_sync():
         sync_lock.release()
 
 
+@app.route('/api/relatorios/compras/historico/info', methods=['GET'])
+@acesso_relatorio_requerido('compras', 'historico')
+def api_relatorio_historico_info():
+    try:
+        total, ultimo_sync, ultimo_sync_status, ultimo_sync_erro = info_relatorio_historico()
+        if ultimo_sync:
+            dt = parse_db_datetime(ultimo_sync)
+            ultimo_sync = dt.strftime('%d/%m/%Y %H:%M')
+        else:
+            ultimo_sync = 'Nunca'
+
+        labels = {
+            'sucesso': 'Novos registros',
+            'sem_novos': 'Sem novidades',
+            'erro': 'Falha no sync',
+            'nunca': 'Nunca executado',
+            'alerta': 'Divergência detectada',
+        }
+        return jsonify({
+            'total_registros': total,
+            'ultima_atualizacao': ultimo_sync,
+            'proximo_sync': calcular_proximo_sync(),
+            'ultimo_sync_status': ultimo_sync_status,
+            'ultimo_sync_status_label': labels.get(ultimo_sync_status, 'Desconhecido'),
+            'ultimo_sync_erro': ultimo_sync_erro
+        })
+    except Exception:
+        return jsonify({
+            'total_registros': 'Erro',
+            'ultima_atualizacao': 'Falha ao consultar',
+            'proximo_sync': '--',
+            'ultimo_sync_status': 'erro',
+            'ultimo_sync_status_label': 'Falha ao consultar',
+            'ultimo_sync_erro': None
+        }), 500
+
+
+@app.route('/api/relatorios/compras/historico/historico-sync', methods=['GET'])
+@acesso_relatorio_requerido('compras', 'historico')
+def api_historico_sync_historico():
+    try:
+        historico = []
+        for linha in historico_sync_historico():
+            executado_em = linha['executado_em']
+            if executado_em:
+                executado_em = parse_db_datetime(executado_em).strftime('%d/%m/%Y %H:%M')
+            historico.append({
+                'executado_em': executado_em or '--',
+                'registros_novos': linha['registros_novos']
+            })
+        return jsonify({'historico': historico})
+    except Exception:
+        return jsonify({'erro': 'Falha ao carregar histórico de sincronização.'}), 500
+
+
+@app.route('/api/relatorios/compras/historico/download', methods=['GET'])
+@acesso_relatorio_requerido('compras', 'historico')
+def api_relatorio_historico_download():
+    formato = request.args.get('formato', 'csv').lower()
+    data_inicio = _iso_para_protheus(request.args.get('data_inicio'))
+    data_fim = _iso_para_protheus(request.args.get('data_fim'))
+
+    try:
+        if formato == 'excel':
+            dados, total = gerar_excel_historico(data_inicio=data_inicio, data_fim=data_fim)
+            registrar_log('download_historico_excel', session.get('usuario_id'), session.get('usuario_nome'))
+            registrar_download_historico(formato, total)
+            return Response(
+                dados,
+                mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                headers={'Content-Disposition': 'attachment; filename=historico_pedidos.xlsx'}
+            )
+        else:
+            dados, total = gerar_csv_historico(data_inicio=data_inicio, data_fim=data_fim)
+            registrar_log('download_historico_csv', session.get('usuario_id'), session.get('usuario_nome'))
+            registrar_download_historico(formato, total)
+            return Response(
+                dados,
+                mimetype='text/csv',
+                headers={'Content-Disposition': 'attachment; filename=historico_pedidos.csv'}
+            )
+    except Exception:
+        return jsonify({'erro': 'Falha ao gerar relatório.'}), 500
+
+
+@app.route('/api/relatorios/compras/historico/sync', methods=['POST'])
+@acesso_relatorio_requerido('compras', 'historico')
+def api_relatorio_historico_sync():
+    global ultimo_sync_dt
+    if not sync_lock.acquire(blocking=False):
+        return jsonify({'erro': 'Já existe uma sincronização em andamento.'}), 409
+    try:
+        novos = sincronizar_historico()
+        ultimo_sync_dt = agora_sp()
+        criar_backup_diario()
+        limpar_logs_antigos()
+        registrar_log('sync_manual_historico', session.get('usuario_id'), session.get('usuario_nome'))
+        return jsonify({
+            'mensagem': f'Sincronização concluída. {novos} registro(s) novo(s).'
+        })
+    except Exception as e:
+        registrar_sync_event_historico(0, 'erro', str(e)[:180])
+        return jsonify({'erro': 'Falha ao sincronizar com o Protheus.'}), 500
+    finally:
+        sync_lock.release()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MÓDULO FINANCEIRO — 5 relatórios (NF Entrada, NF Saída, CR, CP, MB)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _financeiro_info_response(info_fn, proximo_sync_fn=None):
+    total, ultima, status, erro = info_fn()
+    LABELS = {'sucesso': 'Atualizado', 'sem_novos': 'Sem novos registros',
+               'erro': 'Erro no último sync', 'nunca': 'Nunca sincronizado'}
+    return jsonify({
+        'total_registros':       total,
+        'ultima_atualizacao':    ultima or '--',
+        'proximo_sync':          calcular_proximo_sync(),
+        'ultimo_sync_status':    status or 'nunca',
+        'ultimo_sync_status_label': LABELS.get(status or 'nunca', status or '--'),
+        'erro_resumo':           erro,
+    })
+
+
+def _financeiro_historico_response(historico_fn):
+    linhas = historico_fn(limit=10)
+    return jsonify({
+        'historico': [
+            {'executado_em': r['executado_em'], 'registros_novos': r['registros_novos']}
+            for r in linhas
+        ]
+    })
+
+
+def _financeiro_sync_response(sincronizar_fn, nome):
+    if not sync_lock.acquire(blocking=False):
+        return jsonify({'erro': 'Sync já em progresso. Tente novamente em instantes.'}), 409
+    try:
+        novos = sincronizar_fn()
+        registrar_log(f'sync_manual_{nome}', session.get('usuario_id'), session.get('usuario_nome'))
+        return jsonify({'mensagem': f'Sincronização concluída. {novos} registro(s) processado(s).'})
+    except Exception as e:
+        return jsonify({'erro': f'Falha ao sincronizar com o Protheus: {str(e)[:120]}'}), 500
+    finally:
+        sync_lock.release()
+
+
+def _financeiro_download_response(gerar_csv_fn, gerar_excel_fn, nome_arquivo, formato,
+                                   data_inicio=None, data_fim=None):
+    """Responde download de relatório financeiro.
+
+    - Excel: gerado em buffer (write_only) e devolvido como bytes.
+    - CSV: STREAMING via generator (footprint constante, primeira linha chega
+      antes da query terminar). A auditoria registra o total ao final do stream.
+    """
+    try:
+        if formato == 'excel':
+            conteudo, total = gerar_excel_fn(data_inicio, data_fim)
+            _auditar_download_financeiro_seguro(nome_arquivo, 'excel', total)
+            return Response(
+                conteudo,
+                mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                headers={'Content-Disposition': f'attachment; filename={nome_arquivo}.xlsx'},
+            )
+
+        gerador, total_callable = gerar_csv_fn(data_inicio, data_fim)
+
+        def stream_com_auditoria():
+            try:
+                for chunk in gerador:
+                    yield chunk
+            finally:
+                # registra apenas após o stream terminar (sucesso ou abort)
+                try:
+                    _auditar_download_financeiro_seguro(nome_arquivo, 'csv', total_callable())
+                except Exception:
+                    pass
+
+        return Response(
+            stream_com_auditoria(),
+            mimetype='text/csv; charset=utf-8',
+            headers={'Content-Disposition': f'attachment; filename={nome_arquivo}.csv'},
+        )
+    except Exception as e:
+        return jsonify({'erro': f'Erro ao gerar relatório: {str(e)[:120]}'}), 500
+
+
+def _auditar_download_financeiro_seguro(relatorio, formato, total):
+    """Best-effort: nunca pode falhar a ponto de quebrar o download para o usuário."""
+    try:
+        registrar_log(
+            f'download_financeiro_{relatorio}_{formato}',
+            session.get('usuario_id'),
+            session.get('usuario_nome'),
+        )
+    except Exception:
+        app.logger.exception('Falha ao registrar logs_acesso de download financeiro')
+    try:
+        registrar_download_financeiro(relatorio, formato, total)
+    except Exception:
+        app.logger.exception('Falha ao registrar financeiro_downloads_log')
+
+
+# ── NF de Entrada ─────────────────────────────────────────────────────────────
+
+@app.route('/relatorios/financeiro/nf-entrada')
+@acesso_relatorio_requerido('financeiro', 'nf_entrada')
+def pagina_financeiro_nf_entrada():
+    usuario = usuario_atual()
+    return render_template(
+        'relatorios/financeiro_nf_entrada.html',
+        query_preview=QUERY_NF_ENTRADA,
+        pode_ver_query=bool(usuario and (usuario['is_admin'] or usuario['pode_ver_query'])),
+        **contexto_auth('ProtheusData - NF Entrada'),
+    )
+
+@app.route('/api/relatorios/financeiro/nf-entrada/info')
+@acesso_relatorio_requerido('financeiro', 'nf_entrada')
+def api_financeiro_nf_entrada_info():
+    return _financeiro_info_response(info_relatorio_nf_entrada)
+
+@app.route('/api/relatorios/financeiro/nf-entrada/historico-sync')
+@acesso_relatorio_requerido('financeiro', 'nf_entrada')
+def api_financeiro_nf_entrada_historico():
+    return _financeiro_historico_response(historico_sync_nf_entrada)
+
+@app.route('/api/relatorios/financeiro/nf-entrada/sync', methods=['POST'])
+@acesso_relatorio_requerido('financeiro', 'nf_entrada')
+def api_financeiro_nf_entrada_sync():
+    return _financeiro_sync_response(sincronizar_nf_entrada, 'nf_entrada')
+
+@app.route('/api/relatorios/financeiro/nf-entrada/download')
+@acesso_relatorio_requerido('financeiro', 'nf_entrada')
+def api_financeiro_nf_entrada_download():
+    fmt = request.args.get('formato', 'csv')
+    di  = _iso_para_protheus(request.args.get('data_inicio'))
+    df  = _iso_para_protheus(request.args.get('data_fim'))
+    return _financeiro_download_response(
+        gerar_csv_nf_entrada, gerar_excel_nf_entrada, 'nf_entrada', fmt, di, df
+    )
+
+# ── NF de Saída ───────────────────────────────────────────────────────────────
+
+@app.route('/relatorios/financeiro/nf-saida')
+@acesso_relatorio_requerido('financeiro', 'nf_saida')
+def pagina_financeiro_nf_saida():
+    usuario = usuario_atual()
+    return render_template(
+        'relatorios/financeiro_nf_saida.html',
+        query_preview=QUERY_NF_SAIDA,
+        pode_ver_query=bool(usuario and (usuario['is_admin'] or usuario['pode_ver_query'])),
+        **contexto_auth('ProtheusData - NF Saída'),
+    )
+
+@app.route('/api/relatorios/financeiro/nf-saida/info')
+@acesso_relatorio_requerido('financeiro', 'nf_saida')
+def api_financeiro_nf_saida_info():
+    return _financeiro_info_response(info_relatorio_nf_saida)
+
+@app.route('/api/relatorios/financeiro/nf-saida/historico-sync')
+@acesso_relatorio_requerido('financeiro', 'nf_saida')
+def api_financeiro_nf_saida_historico():
+    return _financeiro_historico_response(historico_sync_nf_saida)
+
+@app.route('/api/relatorios/financeiro/nf-saida/sync', methods=['POST'])
+@acesso_relatorio_requerido('financeiro', 'nf_saida')
+def api_financeiro_nf_saida_sync():
+    return _financeiro_sync_response(sincronizar_nf_saida, 'nf_saida')
+
+@app.route('/api/relatorios/financeiro/nf-saida/download')
+@acesso_relatorio_requerido('financeiro', 'nf_saida')
+def api_financeiro_nf_saida_download():
+    fmt = request.args.get('formato', 'csv')
+    di  = _iso_para_protheus(request.args.get('data_inicio'))
+    df  = _iso_para_protheus(request.args.get('data_fim'))
+    return _financeiro_download_response(
+        gerar_csv_nf_saida, gerar_excel_nf_saida, 'nf_saida', fmt, di, df
+    )
+
+# ── Contas a Receber ──────────────────────────────────────────────────────────
+
+@app.route('/relatorios/financeiro/contas-receber')
+@acesso_relatorio_requerido('financeiro', 'contas_receber')
+def pagina_financeiro_contas_receber():
+    usuario = usuario_atual()
+    return render_template(
+        'relatorios/financeiro_contas_receber.html',
+        query_preview=QUERY_CONTAS_RECEBER,
+        pode_ver_query=bool(usuario and (usuario['is_admin'] or usuario['pode_ver_query'])),
+        **contexto_auth('ProtheusData - Contas a Receber'),
+    )
+
+@app.route('/api/relatorios/financeiro/contas-receber/info')
+@acesso_relatorio_requerido('financeiro', 'contas_receber')
+def api_financeiro_contas_receber_info():
+    return _financeiro_info_response(info_relatorio_contas_receber)
+
+@app.route('/api/relatorios/financeiro/contas-receber/historico-sync')
+@acesso_relatorio_requerido('financeiro', 'contas_receber')
+def api_financeiro_contas_receber_historico():
+    return _financeiro_historico_response(historico_sync_contas_receber)
+
+@app.route('/api/relatorios/financeiro/contas-receber/sync', methods=['POST'])
+@acesso_relatorio_requerido('financeiro', 'contas_receber')
+def api_financeiro_contas_receber_sync():
+    return _financeiro_sync_response(sincronizar_contas_receber, 'contas_receber')
+
+@app.route('/api/relatorios/financeiro/contas-receber/download')
+@acesso_relatorio_requerido('financeiro', 'contas_receber')
+def api_financeiro_contas_receber_download():
+    fmt = request.args.get('formato', 'csv')
+    di  = _iso_para_protheus(request.args.get('data_inicio'))
+    df  = _iso_para_protheus(request.args.get('data_fim'))
+    return _financeiro_download_response(
+        gerar_csv_contas_receber, gerar_excel_contas_receber, 'contas_receber', fmt, di, df
+    )
+
+# ── Contas a Pagar ────────────────────────────────────────────────────────────
+
+@app.route('/relatorios/financeiro/contas-pagar')
+@acesso_relatorio_requerido('financeiro', 'contas_pagar')
+def pagina_financeiro_contas_pagar():
+    usuario = usuario_atual()
+    return render_template(
+        'relatorios/financeiro_contas_pagar.html',
+        query_preview=QUERY_CONTAS_PAGAR,
+        pode_ver_query=bool(usuario and (usuario['is_admin'] or usuario['pode_ver_query'])),
+        **contexto_auth('ProtheusData - Contas a Pagar'),
+    )
+
+@app.route('/api/relatorios/financeiro/contas-pagar/info')
+@acesso_relatorio_requerido('financeiro', 'contas_pagar')
+def api_financeiro_contas_pagar_info():
+    return _financeiro_info_response(info_relatorio_contas_pagar)
+
+@app.route('/api/relatorios/financeiro/contas-pagar/historico-sync')
+@acesso_relatorio_requerido('financeiro', 'contas_pagar')
+def api_financeiro_contas_pagar_historico():
+    return _financeiro_historico_response(historico_sync_contas_pagar)
+
+@app.route('/api/relatorios/financeiro/contas-pagar/sync', methods=['POST'])
+@acesso_relatorio_requerido('financeiro', 'contas_pagar')
+def api_financeiro_contas_pagar_sync():
+    return _financeiro_sync_response(sincronizar_contas_pagar, 'contas_pagar')
+
+@app.route('/api/relatorios/financeiro/contas-pagar/download')
+@acesso_relatorio_requerido('financeiro', 'contas_pagar')
+def api_financeiro_contas_pagar_download():
+    fmt = request.args.get('formato', 'csv')
+    di  = _iso_para_protheus(request.args.get('data_inicio'))
+    df  = _iso_para_protheus(request.args.get('data_fim'))
+    return _financeiro_download_response(
+        gerar_csv_contas_pagar, gerar_excel_contas_pagar, 'contas_pagar', fmt, di, df
+    )
+
+# ── Movimentos Bancários ──────────────────────────────────────────────────────
+
+@app.route('/relatorios/financeiro/mov-bancarios')
+@acesso_relatorio_requerido('financeiro', 'mov_bancarios')
+def pagina_financeiro_mov_bancarios():
+    usuario = usuario_atual()
+    return render_template(
+        'relatorios/financeiro_mov_bancarios.html',
+        query_preview=QUERY_MOV_BANCARIOS,
+        pode_ver_query=bool(usuario and (usuario['is_admin'] or usuario['pode_ver_query'])),
+        **contexto_auth('ProtheusData - Movimentos Bancários'),
+    )
+
+@app.route('/api/relatorios/financeiro/mov-bancarios/info')
+@acesso_relatorio_requerido('financeiro', 'mov_bancarios')
+def api_financeiro_mov_bancarios_info():
+    return _financeiro_info_response(info_relatorio_mov_bancarios)
+
+@app.route('/api/relatorios/financeiro/mov-bancarios/historico-sync')
+@acesso_relatorio_requerido('financeiro', 'mov_bancarios')
+def api_financeiro_mov_bancarios_historico():
+    return _financeiro_historico_response(historico_sync_mov_bancarios)
+
+@app.route('/api/relatorios/financeiro/mov-bancarios/sync', methods=['POST'])
+@acesso_relatorio_requerido('financeiro', 'mov_bancarios')
+def api_financeiro_mov_bancarios_sync():
+    return _financeiro_sync_response(sincronizar_mov_bancarios, 'mov_bancarios')
+
+@app.route('/api/relatorios/financeiro/mov-bancarios/download')
+@acesso_relatorio_requerido('financeiro', 'mov_bancarios')
+def api_financeiro_mov_bancarios_download():
+    fmt = request.args.get('formato', 'csv')
+    di  = _iso_para_protheus(request.args.get('data_inicio'))
+    df  = _iso_para_protheus(request.args.get('data_fim'))
+    return _financeiro_download_response(
+        gerar_csv_mov_bancarios, gerar_excel_mov_bancarios, 'mov_bancarios', fmt, di, df
+    )
+
+
+# ── Energy — Contas a Pagar ──────────────────────────────────────────────────
+
+@app.route('/relatorios/energy/contas-pagar')
+@acesso_relatorio_requerido('energy', 'contas_pagar')
+def pagina_energy_contas_pagar():
+    usuario = usuario_atual()
+    return render_template(
+        'relatorios/energy_contas_pagar.html',
+        query_preview=QUERY_ENERGY_CONTAS_PAGAR,
+        pode_ver_query=bool(usuario and (usuario['is_admin'] or usuario['pode_ver_query'])),
+        **contexto_auth('ProtheusData - Energy Contas a Pagar'),
+    )
+
+@app.route('/api/relatorios/energy/contas-pagar/info')
+@acesso_relatorio_requerido('energy', 'contas_pagar')
+def api_energy_contas_pagar_info():
+    return _financeiro_info_response(info_relatorio_energy_contas_pagar)
+
+@app.route('/api/relatorios/energy/contas-pagar/historico-sync')
+@acesso_relatorio_requerido('energy', 'contas_pagar')
+def api_energy_contas_pagar_historico():
+    return _financeiro_historico_response(historico_sync_energy_contas_pagar)
+
+@app.route('/api/relatorios/energy/contas-pagar/sync', methods=['POST'])
+@acesso_relatorio_requerido('energy', 'contas_pagar')
+def api_energy_contas_pagar_sync():
+    return _financeiro_sync_response(sincronizar_energy_contas_pagar, 'energy_contas_pagar')
+
+@app.route('/api/relatorios/energy/contas-pagar/download')
+@acesso_relatorio_requerido('energy', 'contas_pagar')
+def api_energy_contas_pagar_download():
+    fmt = request.args.get('formato', 'csv')
+    di  = _iso_para_protheus(request.args.get('data_inicio'))
+    df  = _iso_para_protheus(request.args.get('data_fim'))
+    return _financeiro_download_response(
+        gerar_csv_energy_contas_pagar, gerar_excel_energy_contas_pagar,
+        'energy_contas_pagar', fmt, di, df,
+    )
+
+
+def _iso_para_protheus(data_iso):
+    """Converte '2024-01-15' (HTML date input) para '20240115' (formato Protheus no banco).
+    Retorna None se a data for vazia ou inválida."""
+    if not data_iso:
+        return None
+    partes = data_iso.strip().split('-')
+    if len(partes) == 3:
+        return ''.join(partes)
+    return None
+
+
 def registrar_download(formato, registros):
     conn = conectar_pedidos()
     conn.execute(
         'INSERT INTO downloads_log (usuario_id, usuario_nome, formato, registros, data_hora) VALUES (?, ?, ?, ?, ?)',
+        (session.get('usuario_id'), session.get('usuario_nome'), formato, registros, agora())
+    )
+    conn.commit()
+    conn.close()
+
+
+def registrar_download_historico(formato, registros):
+    conn = conectar_pedidos()
+    conn.execute(
+        'INSERT INTO historico_downloads_log (usuario_id, usuario_nome, formato, registros, data_hora) VALUES (?, ?, ?, ?, ?)',
         (session.get('usuario_id'), session.get('usuario_nome'), formato, registros, agora())
     )
     conn.commit()
@@ -1694,6 +3371,33 @@ def registrar_download_estoque(formato, registros):
     )
     conn.commit()
     conn.close()
+
+
+def registrar_download_financeiro(relatorio, formato, registros):
+    """Registra download de relatório financeiro (CSV/Excel) para auditoria."""
+    payload = (
+        session.get('usuario_id'),
+        session.get('usuario_nome'),
+        relatorio,
+        formato,
+        registros,
+        request.remote_addr if request else None,
+        agora(),
+    )
+    conn = conectar_financeiro()
+    try:
+        conn.execute(
+            'INSERT INTO financeiro_downloads_log '
+            '(usuario_id, usuario_nome, relatorio, formato, registros, ip, data_hora) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?)',
+            payload,
+        )
+        conn.commit()
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 @app.route('/api/admin/usuarios', methods=['GET'])
@@ -1954,11 +3658,32 @@ def api_admin_reenviar_email(usuario_id):
 @app.route('/api/admin/logs', methods=['GET'])
 @admin_requerido
 def api_admin_logs():
-    usuario_id = request.args.get('usuario_id', type=int)
-    acao = request.args.get('acao', '').strip() or None
+    usuario_id  = request.args.get('usuario_id', type=int)
+    acao        = request.args.get('acao', '').strip() or None
+    busca       = request.args.get('busca', '').strip() or None
+    data_inicio = request.args.get('data_inicio', '').strip() or None
+    data_fim    = request.args.get('data_fim', '').strip() or None
+    pagina      = max(1, request.args.get('pagina', 1, type=int))
+    por_pagina  = 25
+    offset      = (pagina - 1) * por_pagina
+
+    auditoria = listar_auditoria_admin(
+        limit=por_pagina, offset=offset,
+        usuario_id=usuario_id, acao=acao,
+        busca=busca, data_inicio=data_inicio, data_fim=data_fim,
+    )
+    acesso = listar_logs_acesso(
+        limit=por_pagina, offset=offset,
+        busca=busca, acao=acao,
+        data_inicio=data_inicio, data_fim=data_fim,
+    )
     return jsonify({
-        'logs_acesso': listar_logs_acesso(),
-        'auditoria': listar_auditoria_admin(usuario_id=usuario_id, acao=acao),
+        'auditoria':    auditoria['itens'],
+        'logs_acesso':  acesso['itens'],
+        'total_auditoria': auditoria['total'],
+        'total_acesso':    acesso['total'],
+        'pagina':          pagina,
+        'por_pagina':      por_pagina,
     })
 
 
@@ -2005,16 +3730,35 @@ def api_health():
     return jsonify(status)
 
 
-def inicializar():
-    global ultimo_sync_dt
+def garantir_schemas():
+    """Cria/migra todas as tabelas. Idempotente, executado por TODOS os workers
+    (no post_fork) para garantir que cada processo abra conexões válidas."""
     criar_tabelas()
     consolidar_sync_log_pedidos()
     consolidar_sync_log_estoque()
+
+
+def inicializar():
+    """Worker designado como scheduler-owner.
+
+    Executa uma vez no post_fork do primeiro worker:
+      1) garante schemas
+      2) limpa logs antigos
+      3) faz cargas iniciais (idempotentes — pulam se já há dados)
+      4) cria backup diário
+      5) agenda próximo sync (Timer no processo do worker)
+
+    Outros workers chamam apenas garantir_schemas() — sem Timer, sem carga,
+    sem backup — para não duplicar tarefas.
+    """
+    global ultimo_sync_dt
+    garantir_schemas()
     limpar_logs_antigos()
     print('[STARTUP] Verificando carga inicial...')
     try:
         total_pedidos = carga_inicial_pedidos()
-        total_estoque = carga_inicial_estoque()
+        total_estoque   = carga_inicial_estoque()
+        total_historico = carga_inicial_historico()
         if total_pedidos > 0:
             print(f'[STARTUP] Carga inicial de pedidos concluída. {total_pedidos} registros importados.')
         else:
@@ -2024,6 +3768,30 @@ def inicializar():
             print(f'[STARTUP] Carga inicial de estoque concluída. {total_estoque} registros importados.')
         else:
             print('[STARTUP] Dados de estoque já existem no banco local.')
+
+        if total_historico > 0:
+            print(f'[STARTUP] Carga inicial do histórico concluída. {total_historico} registros importados.')
+        else:
+            print('[STARTUP] Dados do histórico de pedidos já existem no banco local.')
+
+        # ── Módulo Financeiro ─────────────────────────────────────────────────
+        _financeiro_cargas_iniciais = [
+            ('NF Entrada',           carga_inicial_nf_entrada),
+            ('NF Saída',             carga_inicial_nf_saida),
+            ('Contas a Receber',     carga_inicial_contas_receber),
+            ('Contas a Pagar',       carga_inicial_contas_pagar),
+            ('Movimentos Bancários', carga_inicial_mov_bancarios),
+            ('Energy — Contas a Pagar', carga_inicial_energy_contas_pagar),
+        ]
+        for nome_fin, fn_fin in _financeiro_cargas_iniciais:
+            try:
+                tot = fn_fin()
+                if tot > 0:
+                    print(f'[STARTUP] Financeiro — {nome_fin}: {tot} registros importados.')
+                else:
+                    print(f'[STARTUP] Financeiro — {nome_fin}: dados já existem.')
+            except Exception as e_fin:
+                print(f'[STARTUP] Financeiro — {nome_fin}: erro na carga inicial: {e_fin}')
 
         _, ultimo_sync_pedidos, _, _ = info_relatorio_pedidos()
         _, ultimo_sync_estoque, _, _ = info_relatorio_estoque()
@@ -2042,7 +3810,13 @@ def inicializar():
     print(f'[SYNC] Próximo sync agendado para {calcular_proximo_sync()}.')
 
 
-inicializar()
+# ─── Bootstrap por worker ────────────────────────────────────────────────────
+# - Sob Gunicorn (>=1 worker): gunicorn_conf.py chama garantir_schemas() em
+#   todos os workers via post_fork e inicializar() apenas no worker designado
+#   como SCHEDULER_OWNER (worker.age == 0).
+# - Sob Flask dev server / execução direta: rodamos inicializar() aqui mesmo.
+if not os.getenv('GUNICORN_WORKER_BOOT'):
+    inicializar()
 
 if __name__ == '__main__':
     app.run(debug=False, port=5000, use_reloader=False)
