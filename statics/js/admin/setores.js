@@ -6,6 +6,14 @@ document.addEventListener('DOMContentLoaded', function() {
     var catalogo       = JSON.parse(document.getElementById('admin-relatorios-catalogo').textContent || '[]');
     var mensagemTimeout = null;
 
+    function verificarAuth(resp) {
+        if (resp.status === 401) {
+            window.location.href = '/login';
+            return false;
+        }
+        return true;
+    }
+
     function mostrarMensagem(texto, tipo) {
         mensagem.textContent = texto;
         mensagem.className = 'mensagem ' + (tipo || 'sucesso') + ' visivel';
@@ -114,7 +122,7 @@ document.addEventListener('DOMContentLoaded', function() {
     function carregarDados() {
         mostrarMensagem('Carregando setores...', 'processando');
         return fetch('/api/admin/setores')
-            .then(function(r) { return r.json().then(function(d) { if (!r.ok) throw new Error(d.erro); return d; }); })
+            .then(function(r) { if (!verificarAuth(r)) return null; return r.json().then(function(d) { if (!r.ok) throw new Error(d.erro); return d; }); })
             .then(function(d) { renderizarSetores(d.setores || []); mostrarMensagem('Setores carregados.', 'sucesso'); })
             .catch(function(e) { mostrarMensagem(e.message || 'Falha ao carregar setores.', 'erro'); });
     }
@@ -133,7 +141,7 @@ document.addEventListener('DOMContentLoaded', function() {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         })
-        .then(function(r) { return r.json().then(function(d) { if (!r.ok) throw new Error(d.erro); return d; }); })
+        .then(function(r) { if (!verificarAuth(r)) return null; return r.json().then(function(d) { if (!r.ok) throw new Error(d.erro); return d; }); })
         .then(function(d) {
             formCriar.reset();
             novoPerms.innerHTML = montarPermissoesHtml('permissoes', []);
@@ -162,7 +170,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             })
-            .then(function(r) { return r.json().then(function(d) { if (!r.ok) throw new Error(d.erro); return d; }); })
+            .then(function(r) { if (!verificarAuth(r)) return null; return r.json().then(function(d) { if (!r.ok) throw new Error(d.erro); return d; }); })
             .then(function(d) { mostrarMensagem(d.mensagem || 'Setor salvo.', 'sucesso'); return carregarDados(); })
             .catch(function(e) { mostrarMensagem(e.message || 'Falha ao salvar setor.', 'erro'); });
         }
@@ -172,7 +180,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!window.confirm('Excluir o setor "' + nomeSetor + '"? Esta ação não pode ser desfeita.')) return;
             mostrarMensagem('Excluindo setor...', 'processando');
             fetch('/api/admin/setores/' + setorId, { method: 'DELETE' })
-            .then(function(r) { return r.json().then(function(d) { if (!r.ok) throw new Error(d.erro); return d; }); })
+            .then(function(r) { if (!verificarAuth(r)) return null; return r.json().then(function(d) { if (!r.ok) throw new Error(d.erro); return d; }); })
             .then(function(d) { mostrarMensagem(d.mensagem || 'Setor excluído.', 'sucesso'); return carregarDados(); })
             .catch(function(e) { mostrarMensagem(e.message || 'Falha ao excluir setor.', 'erro'); });
         }

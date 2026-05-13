@@ -63,7 +63,7 @@
 .dashboard-modulo-topo {
     display: flex;
     flex-direction: column;
-    justify-content: space-between;
+    justify-content: flex-start;
     gap: 12px;
     padding-right: 8px;
     border-right: 1px solid #efefef;

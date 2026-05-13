@@ -15,6 +15,26 @@ document.addEventListener('DOMContentLoaded', function() {
             botoes[i].setAttribute('data-default-label', botoes[i].textContent);
         }
     }
+
+    var btnLimpar = document.getElementById('btn-limpar-filtro');
+    if (btnLimpar) {
+        btnLimpar.addEventListener('click', function() {
+            var inicio = document.getElementById('filtro-data-inicio');
+            var fim    = document.getElementById('filtro-data-fim');
+            if (inicio) inicio.value = '';
+            if (fim)    fim.value   = '';
+            document.querySelector('.painel-controles').classList.remove('filtro-ativo');
+        });
+    }
+
+    var inputInicio = document.getElementById('filtro-data-inicio');
+    var inputFim    = document.getElementById('filtro-data-fim');
+    function atualizarFiltroAtivo() {
+        var ativo = (inputInicio && inputInicio.value) || (inputFim && inputFim.value);
+        document.querySelector('.painel-controles').classList.toggle('filtro-ativo', !!ativo);
+    }
+    if (inputInicio) inputInicio.addEventListener('change', atualizarFiltroAtivo);
+    if (inputFim)    inputFim.addEventListener('change', atualizarFiltroAtivo);
 });
 
 document.getElementById('btn-baixar').addEventListener('click', function() {
@@ -101,42 +121,59 @@ function carregarHistoricoSync() {
         });
 }
 
+function getFiltrosDatas() {
+    var inicio = document.getElementById('filtro-data-inicio');
+    var fim    = document.getElementById('filtro-data-fim');
+    var params = '';
+    if (inicio && inicio.value) params += '&data_inicio=' + inicio.value;
+    if (fim    && fim.value)    params += '&data_fim='    + fim.value;
+    return params;
+}
+
 function baixarRelatorio() {
     var btn = document.getElementById('btn-baixar');
     var formato = getFormato();
     var ext = formato === 'excel' ? '.xlsx' : '.csv';
+    var filtros = getFiltrosDatas();
 
-    definirBotaoCarregando(btn, true, 'Gerando...');
-    mostrarMensagem('Aguarde, gerando relatório de pedidos...', 'processando');
+    if (filtros) {
+        var inicio = document.getElementById('filtro-data-inicio');
+        var fim    = document.getElementById('filtro-data-fim');
+        if (inicio && inicio.value && fim && fim.value && inicio.value > fim.value) {
+            mostrarMensagem('A data de início não pode ser maior que a data de fim.', 'erro');
+            return;
+        }
+    }
 
-    fetch(API_BASE + '/download?formato=' + formato)
+    var url = API_BASE + '/download?formato=' + formato + filtros;
+
+    // Verificar autenticação antes de iniciar o download
+    fetch(API_BASE + '/info', { credentials: 'same-origin' })
         .then(function(resp) {
             if (!verificarAuth(resp)) return;
-            if (!resp.ok) {
-                return resp.json().then(function(data) {
-                    throw new Error(data.erro || 'Erro ao gerar relatório');
-                });
-            }
-            return resp.blob();
-        })
-        .then(function(blob) {
-            if (!blob) return;
-            var url = window.URL.createObjectURL(blob);
+
+            definirBotaoCarregando(btn, true, 'Gerando...');
+            mostrarMensagem(
+                filtros ? 'Aguarde, gerando relatório filtrado...' : 'Aguarde, gerando relatório de pedidos...',
+                'processando'
+            );
+
+            // Navegação direta — mais confiável para arquivos grandes no Chrome
             var a = document.createElement('a');
             a.href = url;
             a.download = 'pedidos_compra' + ext;
+            a.style.display = 'none';
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
-            window.URL.revokeObjectURL(url);
 
-            mostrarMensagem('Relatório gerado e download iniciado.', 'sucesso');
+            setTimeout(function() {
+                definirBotaoCarregando(btn, false);
+                mostrarMensagem('Download iniciado com sucesso.', 'sucesso');
+            }, 2000);
         })
-        .catch(function(err) {
-            mostrarMensagem(err.message || 'Erro ao gerar o relatório.', 'erro');
-        })
-        .finally(function() {
-            definirBotaoCarregando(btn, false);
+        .catch(function() {
+            mostrarMensagem('Não foi possível conectar ao servidor.', 'erro');
         });
 }
 

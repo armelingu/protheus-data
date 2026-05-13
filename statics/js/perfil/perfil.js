@@ -1,17 +1,55 @@
 document.addEventListener('DOMContentLoaded', function() {
-    var tokenNomeEl    = document.getElementById('token-nome');
-    var btnCriar       = document.getElementById('btn-criar-token');
-    var tokenList      = document.getElementById('token-list');
-    var tokenReveal    = document.getElementById('token-novo-reveal');
-    var mensagem       = document.getElementById('mensagem');
-    var urlPedidosEl   = document.getElementById('url-pedidos');
-    var urlEstoqueEl   = document.getElementById('url-estoque');
-    var urlExemploEl   = document.getElementById('url-exemplo-pedidos');
-    var mensagemTimeout = null;
-    var BASE_URL        = window.location.origin;
+    var tokenNomeEl      = document.getElementById('token-nome');
+    var btnCriar         = document.getElementById('btn-criar-token');
+    var tokenList        = document.getElementById('token-list');
+    var tokenReveal      = document.getElementById('token-novo-reveal');
+    var mensagem         = document.getElementById('mensagem');
+    var urlExemploEl     = document.getElementById('url-exemplo');
+    var escopoOpcoes     = document.getElementById('token-escopo-opcoes');
+    var escopoAviso      = document.getElementById('token-escopo-aviso');
+    var endpointsBox     = document.getElementById('endpoints-box');
+    var mensagemTimeout  = null;
+    var BASE_URL         = window.location.origin;
 
-    var permEl = document.getElementById('perfil-permissoes');
-    var perms  = permEl ? JSON.parse(permEl.textContent) : { pode_pedidos: false, pode_estoque: false };
+    // Lista declarativa dos relatórios disponíveis para este usuário, vinda do backend.
+    // Cada item: { chave, tag, titulo, url_path }
+    var endpointsEl = document.getElementById('perfil-endpoints');
+    var ENDPOINTS   = [];
+    try {
+        ENDPOINTS = endpointsEl ? (JSON.parse(endpointsEl.textContent) || []) : [];
+    } catch (e) {
+        ENDPOINTS = [];
+    }
+
+    function montarUrlEndpoint(endpoint, token) {
+        var t = token || 'SEU_TOKEN';
+        return BASE_URL + endpoint.url_path + '?token=' + t;
+    }
+
+    /* ── renderizar checkboxes de escopo disponíveis ──────────────────────── */
+    function renderizarEscopoOpcoes() {
+        if (!escopoOpcoes) return;
+        if (!ENDPOINTS.length) {
+            escopoOpcoes.innerHTML = '<span style="font-size:.82rem;color:#aaa">Nenhum relatório disponível para você.</span>';
+            return;
+        }
+        escopoOpcoes.innerHTML = ENDPOINTS.map(function(ep) {
+            return [
+                '<label class="admin-toggle" style="flex-direction:row;align-items:center;gap:8px;',
+                'padding:8px 12px;border:1px solid #e8e8e8;background:#fafafa;cursor:pointer">',
+                '<input type="checkbox" class="js-escopo-check" value="' + escapeHtml(ep.chave) + '" checked>',
+                '<span style="font-size:.85rem">' + escapeHtml(ep.titulo) + '</span>',
+                '</label>'
+            ].join('');
+        }).join('');
+    }
+
+    function coletarEscopos() {
+        if (!escopoOpcoes) return [];
+        return Array.from(escopoOpcoes.querySelectorAll('.js-escopo-check:checked')).map(function(el) {
+            return el.value;
+        });
+    }
 
     function mostrarMensagem(texto, tipo) {
         mensagem.textContent = texto;
@@ -39,19 +77,34 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    function montarUrls(token) {
-        var t = token || 'SEU_TOKEN';
-        var obj = {};
-        if (perms.pode_pedidos) obj.pedidos = BASE_URL + '/odata/pedidos?token=' + t;
-        if (perms.pode_estoque) obj.estoque = BASE_URL + '/odata/estoque?token=' + t;
-        return obj;
+    function atualizarUrlsInterface(token) {
+        if (!endpointsBox) return;
+        var temToken = !!token;
+        var linhas = endpointsBox.querySelectorAll('.endpoint-row');
+        linhas.forEach(function(row) {
+            var chave = row.getAttribute('data-chave');
+            var urlPath = row.getAttribute('data-url-path');
+            var ep = ENDPOINTS.find(function(e) { return e.chave === chave; })
+                     || { url_path: urlPath };
+            var urlEl = row.querySelector('.js-endpoint-url');
+            var btnEl = row.querySelector('.js-endpoint-copy');
+            var url = montarUrlEndpoint(ep, token);
+            if (urlEl) urlEl.textContent = temToken ? url : '— gere um token para ver a URL —';
+            if (btnEl) btnEl.disabled = !temToken;
+        });
+
+        if (urlExemploEl) {
+            if (temToken && ENDPOINTS.length) {
+                urlExemploEl.textContent = montarUrlEndpoint(ENDPOINTS[0], token);
+            } else {
+                urlExemploEl.textContent = '— gere um token para ver o exemplo —';
+            }
+        }
     }
 
-    function atualizarUrlsInterface(token) {
-        var urls = montarUrls(token);
-        if (urlPedidosEl && urls.pedidos) urlPedidosEl.textContent = urls.pedidos;
-        if (urlEstoqueEl && urls.estoque) urlEstoqueEl.textContent = urls.estoque;
-        if (urlExemploEl && urls.pedidos)  urlExemploEl.textContent = urls.pedidos;
+    function labelPorChave(chave) {
+        var ep = ENDPOINTS.find(function(e) { return e.chave === chave; });
+        return ep ? ep.titulo : chave;
     }
 
     function renderizarTokens(tokens) {
@@ -60,11 +113,20 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
         tokenList.innerHTML = tokens.map(function(t) {
+            var escopoLabels = (t.permissoes || []).map(function(chave) {
+                return '<span style="font-size:.72rem;background:#e8f4ff;color:#1a6fa8;padding:2px 7px;border-radius:0;border:1px solid #b3d9f7">' +
+                    escapeHtml(labelPorChave(chave)) + '</span>';
+            }).join(' ');
+            var escopoHtml = escopoLabels
+                ? '<div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:4px">' + escopoLabels + '</div>'
+                : '<span style="font-size:.72rem;color:#aaa">(escopo legado — acesso via permissões do usuário)</span>';
+
             return [
                 '<li class="token-item" data-id="' + t.id + '">',
                 '<div class="token-item-info">',
                 '<div class="token-item-nome">' + escapeHtml(t.nome) + '</div>',
                 '<div class="token-item-meta">Criado: ' + escapeHtml(t.criado_em) + ' &nbsp;·&nbsp; Último uso: ' + escapeHtml(t.ultimo_uso) + '</div>',
+                escopoHtml,
                 '</div>',
                 '<button type="button" class="token-btn-revogar" data-id="' + t.id + '">Revogar</button>',
                 '</li>'
@@ -72,27 +134,21 @@ document.addEventListener('DOMContentLoaded', function() {
         }).join('');
     }
 
-    function mostrarTokenNovo(token) {
-        var urls = montarUrls(token);
-        var linhasUrls = [];
-        if (urls.pedidos) {
-            linhasUrls.push(
-                '<div class="endpoint-row">',
-                '<span class="endpoint-tag">Pedidos</span>',
-                '<span class="endpoint-url">' + escapeHtml(urls.pedidos) + '</span>',
-                '<button type="button" class="endpoint-copy" data-value="' + escapeHtml(urls.pedidos) + '">Copiar</button>',
-                '</div>'
-            );
-        }
-        if (urls.estoque) {
-            linhasUrls.push(
-                '<div class="endpoint-row">',
-                '<span class="endpoint-tag">Estoque</span>',
-                '<span class="endpoint-url">' + escapeHtml(urls.estoque) + '</span>',
-                '<button type="button" class="endpoint-copy" data-value="' + escapeHtml(urls.estoque) + '">Copiar</button>',
-                '</div>'
-            );
-        }
+    function mostrarTokenNovo(token, escoposSelecionados) {
+        // Gera uma linha de URL para cada endpoint incluído no escopo do token criado.
+        var escoposSet = new Set(escoposSelecionados || []);
+        var linhasUrls = ENDPOINTS
+            .filter(function(ep) { return escoposSet.has(ep.chave); })
+            .map(function(ep) {
+                var url = montarUrlEndpoint(ep, token);
+                return [
+                    '<div class="endpoint-row">',
+                    '<span class="endpoint-tag">' + escapeHtml(ep.tag) + '</span>',
+                    '<span class="endpoint-url">' + escapeHtml(url) + '</span>',
+                    '<button type="button" class="endpoint-copy" data-value="' + escapeHtml(url) + '">Copiar</button>',
+                    '</div>'
+                ].join('');
+            });
 
         tokenReveal.style.display = 'block';
         tokenReveal.innerHTML = [
@@ -127,17 +183,26 @@ document.addEventListener('DOMContentLoaded', function() {
     btnCriar.addEventListener('click', function() {
         var nome = tokenNomeEl.value.trim();
         if (!nome) { tokenNomeEl.focus(); mostrarMensagem('Dê um nome ao token antes de criar.', 'erro'); return; }
+
+        var escopos = coletarEscopos();
+        if (!escopos.length) {
+            if (escopoAviso) escopoAviso.style.display = 'block';
+            mostrarMensagem('Selecione pelo menos um relatório para o token.', 'erro');
+            return;
+        }
+        if (escopoAviso) escopoAviso.style.display = 'none';
+
         mostrarMensagem('Gerando token...', 'processando');
         fetch('/api/meu-perfil/tokens', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ nome: nome })
+            body: JSON.stringify({ nome: nome, permissoes: escopos })
         })
         .then(function(r) { return r.json().then(function(d) { if (!r.ok) throw new Error(d.erro); return d; }); })
         .then(function(d) {
             tokenNomeEl.value = '';
             mostrarMensagem(d.mensagem || 'Token gerado.', 'sucesso');
-            mostrarTokenNovo(d.token);
+            mostrarTokenNovo(d.token, escopos);
             atualizarUrlsInterface(d.token);
             return carregarTokens();
         })
@@ -152,7 +217,7 @@ document.addEventListener('DOMContentLoaded', function() {
         fetch('/api/meu-perfil/tokens/' + id, { method: 'DELETE' })
         .then(function(r) { return r.json().then(function(d) { if (!r.ok) throw new Error(d.erro); return d; }); })
         .then(function(d) {
-            mostrarMensagem(d.mensagem || 'Token revogado.', 'sucesso');
+            mostrarMensagem(d.mensagem || 'Token revogado. Atualize a URL nas ferramentas que usavam este token.', 'sucesso');
             tokenReveal.style.display = 'none';
             atualizarUrlsInterface(null);
             return carregarTokens();
@@ -165,13 +230,17 @@ document.addEventListener('DOMContentLoaded', function() {
         copiarTexto(e.target.getAttribute('data-value'), e.target);
     });
 
-    document.querySelectorAll('.endpoint-copy[data-target]').forEach(function(btn) {
-        btn.addEventListener('click', function() {
-            var el = document.getElementById(btn.getAttribute('data-target'));
-            if (el) copiarTexto(el.textContent, btn);
+    if (endpointsBox) {
+        endpointsBox.addEventListener('click', function(e) {
+            var btn = e.target.closest('.js-endpoint-copy');
+            if (!btn || btn.disabled) return;
+            var row = btn.closest('.endpoint-row');
+            var urlEl = row && row.querySelector('.js-endpoint-url');
+            if (urlEl) copiarTexto(urlEl.textContent, btn);
         });
-    });
+    }
 
+    renderizarEscopoOpcoes();
     atualizarUrlsInterface(null);
     carregarTokens();
 });

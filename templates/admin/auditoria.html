@@ -10,7 +10,7 @@
         <div class="admin-header-copy">
             <p class="admin-kicker">Administração</p>
             <h1>Auditoria</h1>
-            <p class="admin-subtitulo">Visualize a trilha administrativa e os eventos recentes de uso do sistema em um formato mais direto, técnico e fácil de conferir.</p>
+            <p class="admin-subtitulo">Trilha completa de eventos administrativos e de acesso do sistema.</p>
         </div>
 
         <nav class="admin-tabs" aria-label="Navegação da administração">
@@ -19,44 +19,110 @@
         </nav>
     </header>
 
+    <!-- Barra de filtros global -->
+    <div class="audit-filtros-bar">
+        <div class="audit-filtros-grupo">
+            <div class="audit-search-wrap">
+                <svg class="audit-search-icon" viewBox="0 0 20 20" fill="none">
+                    <circle cx="8.5" cy="8.5" r="5.5" stroke="currentColor" stroke-width="1.6"/>
+                    <path d="M13 13l3.5 3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+                </svg>
+                <input type="text" id="filtro-busca" class="audit-search-input"
+                       placeholder="Buscar por usuário, IP, detalhe…" autocomplete="off">
+            </div>
+
+            <select id="filtro-acao" class="audit-select">
+                <option value="">Todas as ações</option>
+                <optgroup label="Administração">
+                    <option value="usuario_criado">Usuário criado</option>
+                    <option value="usuario_configuracao_atualizada">Perfil atualizado</option>
+                    <option value="usuario_status_alterado">Status alterado</option>
+                    <option value="usuario_reset_senha">Senha resetada</option>
+                    <option value="usuario_ativado">Usuário ativado</option>
+                    <option value="usuario_desativado">Usuário desativado</option>
+                    <option value="email_acesso_enviado">E-mail de acesso enviado</option>
+                    <option value="setor_criado">Setor criado</option>
+                    <option value="setor_excluido">Setor excluído</option>
+                    <option value="setor_atualizado">Setor atualizado</option>
+                </optgroup>
+                <optgroup label="Acesso">
+                    <option value="login">Login</option>
+                    <option value="logout">Logout</option>
+                    <option value="login_negado_senha_incorreta">Login negado</option>
+                    <option value="troca_senha_primeiro_acesso">Primeiro acesso</option>
+                    <option value="download_csv">Download CSV</option>
+                    <option value="download_excel">Download Excel</option>
+                    <option value="sync_manual">Sync manual</option>
+                </optgroup>
+            </select>
+
+            <div class="audit-datas">
+                <input type="date" id="filtro-data-inicio" class="audit-date-input" title="Data início">
+                <span class="audit-datas-sep">até</span>
+                <input type="date" id="filtro-data-fim" class="audit-date-input" title="Data fim">
+            </div>
+
+            <button id="btn-limpar-filtros" class="audit-btn-limpar" title="Limpar filtros">
+                <svg viewBox="0 0 20 20" fill="none" width="14" height="14">
+                    <path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                </svg>
+                Limpar
+            </button>
+        </div>
+
+        <div class="audit-filtros-status" id="filtros-status"></div>
+    </div>
+
+    <!-- Painel: Trilha Administrativa -->
     <section class="admin-panel">
         <div class="admin-panel-top">
             <div>
                 <p class="admin-section-kicker">Trilha administrativa</p>
-                <h2>Eventos de administração</h2>
+                <h2>
+                    Eventos de administração
+                    <span class="audit-contador" id="contador-auditoria"></span>
+                </h2>
             </div>
             <p class="admin-panel-texto">Criação de usuários, ajustes de permissões, ativações, desativações e redefinições de senha.</p>
         </div>
         <div class="admin-log-table">
-            <div class="admin-log-head">
+            <div class="admin-log-head audit-head-4col">
                 <span>Evento</span>
-                <span>Origem</span>
+                <span>Usuário afetado</span>
+                <span>Executado por</span>
                 <span>Data</span>
             </div>
             <div id="logs-auditoria" class="admin-log-body">
                 <p class="admin-vazio">Carregando auditoria...</p>
             </div>
         </div>
+        <div class="audit-paginacao" id="paginacao-auditoria"></div>
     </section>
 
+    <!-- Painel: Eventos de Acesso -->
     <section class="admin-panel">
         <div class="admin-panel-top">
             <div>
                 <p class="admin-section-kicker">Uso do sistema</p>
-                <h2>Eventos de acesso</h2>
+                <h2>
+                    Eventos de acesso
+                    <span class="audit-contador" id="contador-acesso"></span>
+                </h2>
             </div>
-            <p class="admin-panel-texto">Últimos logins, logouts, downloads e sincronizações executadas pelos usuários do ambiente.</p>
+            <p class="admin-panel-texto">Logins, logouts, downloads e sincronizações executadas pelos usuários.</p>
         </div>
         <div class="admin-log-table">
-            <div class="admin-log-head">
+            <div class="admin-log-head audit-head-4col">
                 <span>Ação</span>
-                <span>Origem</span>
+                <span>Usuário</span>
+                <span>IP</span>
                 <span>Data</span>
             </div>
             <div id="logs-acesso" class="admin-log-body">
                 <p class="admin-vazio">Carregando logs de acesso...</p>
             </div>
         </div>
+        <div class="audit-paginacao" id="paginacao-acesso"></div>
     </section>
 </section>
 

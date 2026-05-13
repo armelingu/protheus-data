@@ -96,8 +96,15 @@
                     <span>Nome do token</span>
                     <input type="text" id="token-nome" placeholder="ex.: Power BI Controladoria" maxlength="60">
                 </label>
-                <button type="button" class="admin-btn admin-btn-primario" id="btn-criar-token" style="white-space:nowrap">+ Gerar token</button>
             </div>
+
+            <div style="margin:12px 0 0">
+                <p style="font-size:.78rem;font-weight:600;color:#aaa;margin:0 0 8px;text-transform:uppercase;letter-spacing:.5px;">Relatórios que este token pode acessar</p>
+                <div id="token-escopo-opcoes" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px"></div>
+                <p style="font-size:.78rem;color:#c0392b;margin:0;display:none" id="token-escopo-aviso">Selecione pelo menos um relatório.</p>
+            </div>
+
+            <button type="button" class="admin-btn admin-btn-primario" id="btn-criar-token" style="white-space:nowrap">+ Gerar token</button>
 
             <div id="token-novo-reveal" style="display:none"></div>
 
@@ -111,27 +118,25 @@
             <hr class="pbi-divider">
 
             <!-- Endpoints — só exibe o que o usuário tem permissão -->
-            {% if pode_pedidos or pode_estoque %}
-            <p style="font-size:.82rem;font-weight:600;color:#aaa;margin:0 0 10px;text-transform:uppercase;letter-spacing:.5px;">Endpoints disponíveis para você</p>
+            {% if endpoints_pbi %}
+            <p style="font-size:.82rem;font-weight:600;color:#aaa;margin:0 0 6px;text-transform:uppercase;letter-spacing:.5px;">Endpoints disponíveis para você</p>
+            <p style="font-size:.8rem;color:#888;margin:0 0 10px;">
+                Gere um token acima para ver as URLs completas prontas para copiar.
+                Se já tiver um token ativo, monte a URL manualmente adicionando
+                <code style="font-family:monospace;background:#f0f0f0;padding:1px 5px;font-size:.78rem">?token=SEU_TOKEN</code> ao endpoint desejado.
+            </p>
 
             <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px" id="endpoints-box">
-                {% if pode_pedidos %}
-                <div class="endpoint-row">
-                    <span class="endpoint-tag">Pedidos</span>
-                    <span class="endpoint-url" id="url-pedidos"></span>
-                    <button type="button" class="endpoint-copy" data-target="url-pedidos">Copiar</button>
+                {% for ep in endpoints_pbi %}
+                <div class="endpoint-row" data-chave="{{ ep.chave }}" data-url-path="{{ ep.url_path }}">
+                    <span class="endpoint-tag">{{ ep.tag }}</span>
+                    <span class="endpoint-url js-endpoint-url">— gere um token para ver a URL —</span>
+                    <button type="button" class="endpoint-copy js-endpoint-copy" disabled>Copiar</button>
                 </div>
-                {% endif %}
-                {% if pode_estoque %}
-                <div class="endpoint-row">
-                    <span class="endpoint-tag">Estoque</span>
-                    <span class="endpoint-url" id="url-estoque"></span>
-                    <button type="button" class="endpoint-copy" data-target="url-estoque">Copiar</button>
-                </div>
-                {% endif %}
+                {% endfor %}
             </div>
             {% else %}
-            <div style="padding:12px 14px;background:#fafafa;border:1px solid #eee;border-radius:8px;margin-bottom:20px;font-size:.85rem;color:#888">
+            <div style="padding:12px 14px;background:#fafafa;border:1px solid #eee;margin-bottom:20px;font-size:.85rem;color:#888">
                 Você não possui permissão em nenhum relatório com integração disponível no momento.
                 Solicite acesso ao administrador.
             </div>
@@ -145,8 +150,9 @@
             <ol class="pbi-steps">
                 <li>
                     <div>
-                        <strong>Gere um token acima</strong>
-                        Clique em "+ Gerar token", dê um nome identificável (ex.: "Power BI Relatórios") e copie o valor exibido.
+                        <strong>Gere um token nesta página</strong>
+                        Dê um nome identificável (ex.: "Power BI Controladoria") e clique em "+ Gerar token".
+                        Uma caixa verde aparecerá com as <strong>URLs já montadas e prontas</strong> para copiar — use-as nos passos seguintes.
                     </div>
                 </li>
                 <li>
@@ -157,27 +163,73 @@
                 </li>
                 <li>
                     <div>
-                        <strong>Cole a URL do endpoint</strong>
-                        Use um dos endpoints exibidos acima, com o token gerado já incluído.<br>
-                        {% if pode_pedidos %}<small>Exemplo: <code id="url-exemplo-pedidos"></code></small>{% endif %}
+                        <strong>Cole a URL do endpoint na caixa "URL"</strong>
+                        Use a URL copiada da caixa verde que apareceu ao gerar o token — ela já inclui o token de autenticação.
+                        {% if endpoints_pbi %}<br><small style="color:#888">Formato esperado: <code id="url-exemplo" style="font-size:.78rem">— gere um token para ver o exemplo —</code></small>{% endif %}
                     </div>
                 </li>
                 <li>
                     <div>
-                        <strong>Autenticação</strong>
-                        Quando solicitado, escolha <strong>Anônima</strong> — a autenticação já está embutida na URL via token.
+                        <strong>Escolha "Anônima" na etapa de autenticação</strong>
+                        O Power BI pedirá como autenticar — selecione <strong>Anônima</strong> e clique em Conectar.
+                        A autenticação já está embutida na URL pelo token.
                     </div>
                 </li>
                 <li>
                     <div>
-                        <strong>Carregue e modele os dados</strong>
-                        Clique em <strong>Carregar</strong> (ou <strong>Transformar Dados</strong> se quiser ajustar colunas). Os dados são atualizados automaticamente a cada hora pelo sistema.
+                        <strong>Carregue os dados</strong>
+                        Clique em <strong>Carregar</strong> para importar diretamente, ou em <strong>Transformar Dados</strong> para ajustar colunas antes. Os dados refletem o último sync do sistema.
+                    </div>
+                </li>
+                <li>
+                    <div>
+                        <strong>Configure a atualização agendada</strong>
+                        No Power BI Desktop, vá em <em>Página Inicial → Atualizar</em> a qualquer momento para puxar os dados mais recentes.
+                        Para atualização automática no Power BI Service (online), é necessário um <strong>gateway de dados</strong> — consulte o TI, pois o sistema roda em rede interna.
                     </div>
                 </li>
             </ol>
 
-            <div style="padding:12px 14px;background:#fff8e6;border-left:3px solid #e0a800;border-radius:0 6px 6px 0;margin-top:16px;font-size:.82rem;color:#7a5510">
-                <strong>Dica:</strong> No Power BI, configure a <em>Atualização Agendada</em> do relatório para replicar automaticamente a frequência de sync do sistema (a cada 1 hora).
+            <div style="padding:12px 14px;background:#fff8e6;border-left:3px solid #e0a800;margin-top:16px;font-size:.82rem;color:#7a5510">
+                <strong>Atenção — horário de sincronização:</strong> os dados são atualizados automaticamente <strong>de hora em hora entre 8h e 19h</strong> nos dias úteis. Atualizações feitas no Power BI fora desse horário retornarão os últimos dados disponíveis no cache — não há dados novos do Protheus fora desse período.
+            </div>
+
+            <hr class="pbi-divider">
+
+            <!-- Instruções Excel -->
+            <p style="font-size:.82rem;font-weight:600;color:#aaa;margin:0 0 12px;text-transform:uppercase;letter-spacing:.5px;">Como conectar no Excel (Power Query)</p>
+
+            <ol class="pbi-steps">
+                <li>
+                    <div>
+                        <strong>Gere um token e copie a URL</strong>
+                        Siga o Passo 1 do Power BI acima. A URL gerada funciona igualmente no Excel.
+                    </div>
+                </li>
+                <li>
+                    <div>
+                        <strong>No Excel, abra o Power Query</strong>
+                        Vá em <em>Dados → Obter Dados → De Outras Fontes → Do Feed OData</em>.
+                    </div>
+                </li>
+                <li>
+                    <div>
+                        <strong>Cole a URL e conecte</strong>
+                        Cole a URL copiada e clique em OK. Quando solicitado, escolha <strong>Anônima</strong> como método de autenticação.
+                    </div>
+                </li>
+                <li>
+                    <div>
+                        <strong>Carregue a tabela</strong>
+                        No painel do Power Query, selecione a tabela de dados e clique em <strong>Fechar e Carregar</strong>.
+                        Para atualizar, clique com o botão direito na tabela e selecione <strong>Atualizar</strong>.
+                    </div>
+                </li>
+            </ol>
+
+            <div style="padding:12px 14px;background:#fdecea;border-left:3px solid #c0392b;margin-top:16px;font-size:.82rem;color:#7a1a1a">
+                <strong>Importante — ao revogar um token:</strong> qualquer conexão do Power BI ou Excel que usa aquele token deixará de funcionar imediatamente.
+                Ao criar um token substituto, será necessário atualizar a URL da fonte de dados em cada relatório/pasta de trabalho.
             </div>
         </div>
     </div>
@@ -189,11 +241,8 @@
 {% endblock %}
 
 {% block extra_scripts %}
-<script type="application/json" id="perfil-permissoes">
-{
-    "pode_pedidos": {{ pode_pedidos | tojson }},
-    "pode_estoque": {{ pode_estoque | tojson }}
-}
+<script type="application/json" id="perfil-endpoints">
+{{ endpoints_pbi | tojson }}
 </script>
 <script src="/statics/js/perfil/perfil.js"></script>
 {% endblock %}

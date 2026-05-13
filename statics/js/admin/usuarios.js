@@ -36,6 +36,14 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     /* ── helpers ──────────────────────────────────────────────────────────── */
+    function verificarAuth(resp) {
+        if (resp.status === 401) {
+            window.location.href = '/login';
+            return false;
+        }
+        return true;
+    }
+
     function mostrarMensagem(texto, tipo) {
         mensagem.textContent = texto;
         mensagem.className = 'mensagem ' + (tipo || 'sucesso') + ' visivel';
@@ -104,14 +112,8 @@ document.addEventListener('DOMContentLoaded', function() {
         return '<span class="' + cls + '">E-mail: ' + escapeHtml(label) + '</span>';
     }
 
-    /* ── renderizar lista ─────────────────────────────────────────────────── */
-    function renderizarUsuarios(usuarios) {
-        if (!usuarios.length) {
-            listaUsuarios.innerHTML = '<p class="admin-vazio">Nenhum usuário cadastrado.</p>';
-            return;
-        }
-
-        listaUsuarios.innerHTML = usuarios.map(function(u) {
+    /* ── renderizar linha de usuário ─────────────────────────────────────── */
+    function renderizarLinhaUsuario(u) {
             /* badges de status */
             var badgeAtivo = u.ativo
                 ? '<span class="admin-badge is-ok">Ativo</span>'
@@ -211,7 +213,55 @@ document.addEventListener('DOMContentLoaded', function() {
                 '</div>', /* /aur-edit-panel */
                 '</details>'
             ].join('');
-        }).join('');
+    }
+
+    /* ── renderizar lista agrupada por setor ──────────────────────────────── */
+    function renderizarUsuarios(usuarios) {
+        if (!usuarios.length) {
+            listaUsuarios.innerHTML = '<p class="admin-vazio">Nenhum usuário cadastrado.</p>';
+            return;
+        }
+
+        /* agrupar por setor, "Sem setor" sempre por último */
+        var grupos = {};
+        var ordemGrupos = [];
+        usuarios.forEach(function(u) {
+            var chave = u.setor_nome || '__sem_setor__';
+            if (!grupos[chave]) {
+                grupos[chave] = [];
+                ordemGrupos.push(chave);
+            }
+            grupos[chave].push(u);
+        });
+
+        /* mover "Sem setor" para o final */
+        var idxSemSetor = ordemGrupos.indexOf('__sem_setor__');
+        if (idxSemSetor > -1) {
+            ordemGrupos.splice(idxSemSetor, 1);
+            ordemGrupos.push('__sem_setor__');
+        }
+
+        var html = '';
+        ordemGrupos.forEach(function(chave) {
+            var label = chave === '__sem_setor__' ? 'Sem setor' : chave;
+            var membros = grupos[chave];
+            var totalAtivos = membros.filter(function(u) { return u.ativo; }).length;
+
+            html += [
+                '<div class="admin-setor-grupo">',
+                '<div class="admin-setor-header">',
+                '<span class="admin-setor-nome">' + escapeHtml(label) + '</span>',
+                '<span class="admin-setor-contagem">' + membros.length + ' usuário' + (membros.length !== 1 ? 's' : '') +
+                    ' &nbsp;·&nbsp; ' + totalAtivos + ' ativo' + (totalAtivos !== 1 ? 's' : '') + '</span>',
+                '</div>',
+                '<div class="admin-setor-usuarios">',
+                membros.map(renderizarLinhaUsuario).join(''),
+                '</div>',
+                '</div>'
+            ].join('');
+        });
+
+        listaUsuarios.innerHTML = html;
     }
 
     function metaItem(label, valor) {
@@ -249,6 +299,7 @@ document.addEventListener('DOMContentLoaded', function() {
         mostrarMensagem('Carregando usuários...', 'processando');
         return fetch('/api/admin/usuarios')
             .then(function(resp) {
+                if (!verificarAuth(resp)) return null;
                 return resp.json().then(function(data) {
                     if (!resp.ok) throw new Error(data.erro || 'Falha ao carregar usuários.');
                     return data;
@@ -267,8 +318,8 @@ document.addEventListener('DOMContentLoaded', function() {
     formCriar.addEventListener('submit', function(event) {
         event.preventDefault();
         var email = formCriar.email.value.trim().toLowerCase();
-        if (!/@hbraviacao\.com\.br$/.test(email)) {
-            mostrarMensagem('Use um e-mail corporativo @hbraviacao.com.br.', 'erro');
+        if (!/@(hbraviacao|hbrenergy)\.com\.br$/.test(email)) {
+            mostrarMensagem('Use um e-mail corporativo @hbraviacao.com.br ou @hbrenergy.com.br.', 'erro');
             return;
         }
 
@@ -288,6 +339,7 @@ document.addEventListener('DOMContentLoaded', function() {
             body: JSON.stringify(payload)
         })
         .then(function(resp) {
+            if (!verificarAuth(resp)) return null;
             return resp.json().then(function(data) {
                 if (!resp.ok) throw new Error(data.erro || 'Falha ao criar usuário.');
                 return data;
@@ -334,6 +386,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 body: JSON.stringify(payload)
             })
             .then(function(resp) {
+                if (!verificarAuth(resp)) return null;
                 return resp.json().then(function(data) {
                     if (!resp.ok) throw new Error(data.erro || 'Falha ao salvar.');
                     return data;
@@ -353,6 +406,7 @@ document.addEventListener('DOMContentLoaded', function() {
             mostrarMensagem('Resetando senha...', 'processando');
             fetch('/api/admin/usuarios/' + userId + '/reset-senha', { method: 'POST' })
             .then(function(resp) {
+                if (!verificarAuth(resp)) return null;
                 return resp.json().then(function(data) {
                     if (!resp.ok) throw new Error(data.erro || 'Falha ao resetar senha.');
                     return data;
@@ -372,6 +426,7 @@ document.addEventListener('DOMContentLoaded', function() {
             mostrarMensagem('Reenviando e-mail de acesso...', 'processando');
             fetch('/api/admin/usuarios/' + userId + '/reenviar-email', { method: 'POST' })
             .then(function(resp) {
+                if (!verificarAuth(resp)) return null;
                 return resp.json().then(function(data) {
                     if (!resp.ok) throw new Error(data.erro || 'Falha ao reenviar e-mail.');
                     return data;
@@ -396,6 +451,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 body: JSON.stringify({ ativo: ativar })
             })
             .then(function(resp) {
+                if (!verificarAuth(resp)) return null;
                 return resp.json().then(function(data) {
                     if (!resp.ok) throw new Error(data.erro || 'Falha ao atualizar status.');
                     return data;

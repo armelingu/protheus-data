@@ -162,7 +162,8 @@ body.auth-body.is-page-transitioning .app-shell {
     padding-top: 0;
 }
 
-.menu-modulo + .menu-modulo {
+.menu-modulo + .menu-modulo,
+.menu-modulos + .menu-modulo {
     padding-top: 12px;
     border-top: 1px solid #ececec;
 }
