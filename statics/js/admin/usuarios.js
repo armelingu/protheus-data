@@ -7,6 +7,7 @@ document.addEventListener('DOMContentLoaded', function() {
     var novoQueryToggle  = document.getElementById('novo-pode-ver-query');
     var novoSetorEl      = document.getElementById('novo-setor-id');
     var novoPermissoes   = document.getElementById('novo-usuario-permissoes');
+    var novoPermissoesAll = document.getElementById('novo-usuario-permissoes-all');
     var catalogo         = JSON.parse(document.getElementById('admin-relatorios-catalogo').textContent || '[]');
     var mensagemTimeout  = null;
     var setoresCache     = [];
@@ -94,6 +95,39 @@ document.addEventListener('DOMContentLoaded', function() {
         return Array.from(raiz.querySelectorAll('input[name="' + nomeCampo + '"]:checked')).map(function(i) {
             return i.value;
         });
+    }
+
+    /* ── checkbox "Selecionar todos" para grid de permissões ──────────────── */
+    function bindarToggleTodos(toggleEl, gridEl) {
+        if (!toggleEl || !gridEl || toggleEl.dataset.bound === '1') return;
+        toggleEl.dataset.bound = '1';
+
+        function checkboxesAtivos() {
+            return Array.from(gridEl.querySelectorAll('input[type="checkbox"]:not(:disabled)'));
+        }
+
+        toggleEl.addEventListener('change', function() {
+            checkboxesAtivos().forEach(function(cb) { cb.checked = toggleEl.checked; });
+        });
+
+        gridEl.addEventListener('change', function(event) {
+            if (event.target.type !== 'checkbox') return;
+            atualizarEstadoToggleTodos(toggleEl, gridEl);
+        });
+
+        atualizarEstadoToggleTodos(toggleEl, gridEl);
+    }
+
+    function atualizarEstadoToggleTodos(toggleEl, gridEl) {
+        var inputs = Array.from(gridEl.querySelectorAll('input[type="checkbox"]'));
+        if (!inputs.length) {
+            toggleEl.checked = false;
+            toggleEl.indeterminate = false;
+            return;
+        }
+        var marcados = inputs.filter(function(cb) { return cb.checked; }).length;
+        toggleEl.checked       = marcados === inputs.length;
+        toggleEl.indeterminate = marcados > 0 && marcados < inputs.length;
     }
 
     /* ── email badge ──────────────────────────────────────────────────────── */
@@ -184,6 +218,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 /* seção 2: relatórios */
                 '<div class="aur-edit-section">',
                 '<span class="aur-section-label">Relatórios permitidos</span>',
+                '<label class="admin-permissions-toggle-all">',
+                '<input type="checkbox" class="js-permissoes-all"' + (u.is_admin ? ' disabled' : '') + '>',
+                '<span>Selecionar todos os relatórios</span>',
+                '</label>',
                 '<div class="admin-permissions-grid js-permissoes">',
                 montarPermissoesHtml('permissoes-' + u.id, u.permissoes, u.is_admin),
                 '</div>',
@@ -262,6 +300,13 @@ document.addEventListener('DOMContentLoaded', function() {
         });
 
         listaUsuarios.innerHTML = html;
+
+        /* bindar o "selecionar todos" em cada card */
+        listaUsuarios.querySelectorAll('.admin-user-row').forEach(function(card) {
+            var toggle = card.querySelector('.js-permissoes-all');
+            var grid   = card.querySelector('.js-permissoes');
+            if (toggle && grid) bindarToggleTodos(toggle, grid);
+        });
     }
 
     function metaItem(label, valor) {
@@ -278,6 +323,12 @@ document.addEventListener('DOMContentLoaded', function() {
         card.querySelectorAll('.js-permissoes input[type="checkbox"]').forEach(function(input) {
             input.disabled = isAdmin;
         });
+        var toggle = card.querySelector('.js-permissoes-all');
+        if (toggle) {
+            toggle.disabled = isAdmin;
+            var grid = card.querySelector('.js-permissoes');
+            if (grid) atualizarEstadoToggleTodos(toggle, grid);
+        }
     }
 
     /* ── formulário de criação: sincronizar estado ────────────────────────── */
@@ -286,12 +337,18 @@ document.addEventListener('DOMContentLoaded', function() {
         novoPermissoes.querySelectorAll('input[type="checkbox"]').forEach(function(input) {
             input.disabled = desabilitar;
         });
+        if (novoPermissoesAll) novoPermissoesAll.disabled = desabilitar;
     }
 
     function renderizarCatalogoCriacao() {
         novoPermissoes.innerHTML = montarPermissoesHtml('permissoes', catalogo.map(function(item) {
             return item.chave;
         }), false);
+        if (novoPermissoesAll) {
+            novoPermissoesAll.checked = true;
+            bindarToggleTodos(novoPermissoesAll, novoPermissoes);
+            atualizarEstadoToggleTodos(novoPermissoesAll, novoPermissoes);
+        }
     }
 
     /* ── carregar dados ───────────────────────────────────────────────────── */
