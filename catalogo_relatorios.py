@@ -11,7 +11,15 @@ RELATORIOS_CATALOGO = [
                 'path': '/relatorios/compras/pedidos',
                 'api_base': '/api/relatorios/compras/pedidos',
                 'ativo': True,
-            }
+            },
+            {
+                'id': 'historico',
+                'titulo': 'Histórico de Pedidos',
+                'descricao': 'Todos os pedidos de compra de 2024 até hoje, sem filtro por comprador.',
+                'path': '/relatorios/compras/historico',
+                'api_base': '/api/relatorios/compras/historico',
+                'ativo': True,
+            },
         ],
     },
     {
@@ -29,6 +37,68 @@ RELATORIOS_CATALOGO = [
             }
         ],
     },
+    {
+        'id': 'financeiro',
+        'titulo': 'Controladoria Financeira',
+        'descricao': 'Movimentações financeiras do ERP Protheus: NFs, títulos e movimentos bancários.',
+        'relatorios': [
+            {
+                'id': 'nf_entrada',
+                'titulo': 'NF de Entrada',
+                'descricao': 'Itens das Notas Fiscais de Entrada (SD1) a partir de 2024.',
+                'path': '/relatorios/financeiro/nf-entrada',
+                'api_base': '/api/relatorios/financeiro/nf-entrada',
+                'ativo': True,
+            },
+            {
+                'id': 'nf_saida',
+                'titulo': 'NF de Saída',
+                'descricao': 'Itens das Notas Fiscais de Saída (SD2) a partir de 2024.',
+                'path': '/relatorios/financeiro/nf-saida',
+                'api_base': '/api/relatorios/financeiro/nf-saida',
+                'ativo': True,
+            },
+            {
+                'id': 'contas_receber',
+                'titulo': 'Contas a Receber',
+                'descricao': 'Títulos a receber (SE1) emitidos a partir de 2024.',
+                'path': '/relatorios/financeiro/contas-receber',
+                'api_base': '/api/relatorios/financeiro/contas-receber',
+                'ativo': True,
+            },
+            {
+                'id': 'contas_pagar',
+                'titulo': 'Contas a Pagar',
+                'descricao': 'Títulos a pagar (SE2) emitidos a partir de 2024.',
+                'path': '/relatorios/financeiro/contas-pagar',
+                'api_base': '/api/relatorios/financeiro/contas-pagar',
+                'ativo': True,
+            },
+            {
+                'id': 'mov_bancarios',
+                'titulo': 'Movimentos Bancários',
+                'descricao': 'Movimentos bancários (SE5) registrados a partir de 2024.',
+                'path': '/relatorios/financeiro/mov-bancarios',
+                'api_base': '/api/relatorios/financeiro/mov-bancarios',
+                'ativo': True,
+            },
+        ],
+    },
+    {
+        'id': 'energy',
+        'titulo': 'Energy',
+        'descricao': 'Relatórios do negócio Energy (E2_ITEMD = 05.001).',
+        'relatorios': [
+            {
+                'id': 'contas_pagar',
+                'titulo': 'Contas a Pagar',
+                'descricao': 'Títulos a pagar (SE2) do negócio Energy, excluindo naturezas internas.',
+                'path': '/relatorios/energy/contas-pagar',
+                'api_base': '/api/relatorios/energy/contas-pagar',
+                'ativo': True,
+            },
+        ],
+    },
 ]
 
 
@@ -40,10 +110,18 @@ def listar_modulos():
     return RELATORIOS_CATALOGO
 
 
-def listar_relatorios_flat():
+def listar_relatorios_flat(incluir_admin_only=False):
+    """Retorna a lista plana de relatórios do catálogo.
+
+    Por padrão exclui relatórios marcados com admin_only=True para que não
+    entrem no sistema de permissões de usuários regulares.
+    Passe incluir_admin_only=True para obter todas as chaves válidas (ex.: tokens OData).
+    """
     relatorios = []
     for modulo in RELATORIOS_CATALOGO:
         for relatorio in modulo['relatorios']:
+            if not incluir_admin_only and relatorio.get('admin_only'):
+                continue
             relatorios.append({
                 'modulo_id': modulo['id'],
                 'modulo_titulo': modulo['titulo'],

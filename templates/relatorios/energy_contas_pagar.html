@@ -1,0 +1,103 @@
+{% extends "base_auth.html" %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="/statics/css/relatorios/consulta.css">
+{% endblock %}
+
+{% block page_content %}
+<section class="painel">
+    <header class="painel-topo">
+        <div class="painel-cabecalho">
+            <p class="painel-kicker">Módulo Energy</p>
+            <h1>Contas a Pagar - Energy</h1>
+            <p class="subtitulo">Títulos a pagar do negócio Energy (E2_ITEMD = 05.001), com naturezas internas filtradas.</p>
+        </div>
+
+        <div class="painel-controles">
+            <div class="filtro-datas">
+                <span class="info-label">Período</span>
+                <div class="filtro-datas-inputs">
+                    <label class="filtro-data-label">
+                        <span>De</span>
+                        <input type="date" id="filtro-data-inicio" title="Data de início">
+                    </label>
+                    <label class="filtro-data-label">
+                        <span>Até</span>
+                        <input type="date" id="filtro-data-fim" title="Data de fim">
+                    </label>
+                    <button type="button" id="btn-limpar-filtro" class="btn-terciario" title="Limpar filtro de data">✕</button>
+                </div>
+            </div>
+
+            <div class="formato-download">
+                <span class="info-label">Formato</span>
+                <div class="formato-opcoes">
+                    <label class="formato-radio">
+                        <input type="radio" name="formato" value="csv" checked>
+                        <span>CSV</span>
+                    </label>
+                    <label class="formato-radio">
+                        <input type="radio" name="formato" value="excel">
+                        <span>Excel</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="acoes">
+                <button id="btn-baixar" type="button">Baixar Relatório</button>
+                <button id="btn-sync" type="button" class="btn-secundario">Atualizar Dados</button>
+            </div>
+        </div>
+    </header>
+
+    <div class="info">
+        <div class="info-item">
+            <span class="info-label">Registros</span>
+            <span class="info-valor" id="total-registros">--</span>
+        </div>
+        <div class="info-item">
+            <span class="info-label">Última atualização</span>
+            <span class="info-valor" id="ultima-atualizacao">--</span>
+        </div>
+        <div class="info-item">
+            <span class="info-label">Próximo sync</span>
+            <span class="info-valor" id="proximo-sync">--</span>
+        </div>
+        <div class="info-item">
+            <span class="info-label">Status último sync</span>
+            <span class="status-sync" id="status-sync">--</span>
+        </div>
+    </div>
+
+    {% if pode_ver_query %}
+    <details class="query-details">
+        <summary>Ver query executada</summary>
+        <div class="details-content">
+            <div class="details-content-inner">
+                <pre id="query-preview">{{ query_preview }}</pre>
+            </div>
+        </div>
+    </details>
+    {% endif %}
+
+    <details class="query-details">
+        <summary>Ver histórico de novos registros</summary>
+        <div class="details-content">
+            <div class="details-content-inner">
+                <div class="historico-sync" id="historico-sync">
+                    <p class="historico-vazio">Carregando histórico...</p>
+                </div>
+            </div>
+        </div>
+    </details>
+</section>
+
+<div class="toast-area" aria-live="polite" aria-atomic="true">
+    <div class="mensagem" id="mensagem"></div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/statics/js/energy/contas_pagar.js"></script>
+<script src="/statics/js/financeiro/_base.js"></script>
+{% endblock %}
