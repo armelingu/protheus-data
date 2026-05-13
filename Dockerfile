@@ -12,6 +12,10 @@ RUN apt-get update && \
 ENV TZ=America/Sao_Paulo
 ENV APP_TIMEZONE=America/Sao_Paulo
 ENV PYTHONUNBUFFERED=1
+# Suprime o bootstrap automatico embutido no app.py (inicializar() no import).
+# O bootstrap e disparado explicitamente pelo gunicorn_conf.py:post_fork
+# apenas no SCHEDULER_OWNER (primeiro worker), evitando jobs duplicados.
+ENV GUNICORN_WORKER_BOOT=1
 
 WORKDIR /app
 
@@ -23,7 +27,7 @@ RUN mkdir -p /app/data/backups
 
 EXPOSE 5000
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
-    CMD curl -f http://localhost:5000/health || exit 1
+HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=5 \
+    CMD curl -fsS http://localhost:5000/health || exit 1
 
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--timeout", "120", "app:app"]
+CMD ["gunicorn", "-c", "gunicorn_conf.py", "app:app"]
