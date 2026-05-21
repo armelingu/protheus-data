@@ -31,6 +31,16 @@ from services.relatorios.compras.pedidos import (
     carga_inicial as carga_inicial_pedidos,
     registrar_sync_event as registrar_sync_event_pedidos,
 )
+from services.relatorios.energy.pedidos import (
+    QUERY_PEDIDOS as QUERY_PEDIDOS_ENERGY,
+    gerar_csv as gerar_csv_pedidos_energy,
+    gerar_excel as gerar_excel_pedidos_energy,
+    info_relatorio as info_relatorio_pedidos_energy,
+    historico_sync as historico_sync_pedidos_energy,
+    sincronizar as sincronizar_pedidos_energy,
+    carga_inicial as carga_inicial_pedidos_energy,
+    registrar_sync_event as registrar_sync_event_pedidos_energy,
+)
 from services.relatorios.compras.historico_pedidos import (
     QUERY_HISTORICO_BASE as QUERY_HISTORICO_PEDIDOS,
     gerar_csv_historico,
@@ -171,7 +181,8 @@ ROTAS_LIBERADAS_TROCA_SENHA = {'/primeiro-acesso', '/api/primeiro-acesso', '/api
 ultimo_sync_dt = None
 sync_timer = None
 sync_lock = threading.Lock()
-QUERY_PREVIEW_PEDIDOS = QUERY_PEDIDOS.strip() + '\nORDER BY SC7.C7_EMISSAO DESC'
+QUERY_PREVIEW_PEDIDOS        = QUERY_PEDIDOS.strip() + '\nORDER BY SC7.C7_EMISSAO DESC'
+QUERY_PREVIEW_PEDIDOS_ENERGY = QUERY_PEDIDOS_ENERGY.strip() + '\nORDER BY SC7.C7_EMISSAO DESC'
 QUERY_PREVIEW_ESTOQUE = QUERY_ESTOQUE.strip()
 
 
@@ -1074,9 +1085,10 @@ def rotina_sync():
             try:
                 for tentativa in range(1, MAX_TENTATIVAS_SYNC + 1):
                     try:
-                        novos_pedidos     = sincronizar_pedidos()
-                        alterados_estoque = sincronizar_estoque()
-                        novos_historico   = sincronizar_historico()
+                        novos_pedidos        = sincronizar_pedidos()
+                        novos_pedidos_energy = sincronizar_pedidos_energy()
+                        alterados_estoque    = sincronizar_estoque()
+                        novos_historico      = sincronizar_historico()
 
                         # Módulo Financeiro — paralelo (cada job tem sua própria
                         # conexão pyodbc + conexão SQLite; financeiro.db está em
@@ -1104,6 +1116,7 @@ def rotina_sync():
                         if criar_backup_diario():
                             print('[BACKUP] Backup diário criado com sucesso.')
                         print(f'[SYNC] Pedidos sincronizados. {novos_pedidos} registro(s) novo(s).')
+                        print(f'[SYNC] Pedidos Energy sincronizados. {novos_pedidos_energy} registro(s) novo(s).')
                         print(f'[SYNC] Estoque sincronizado. {alterados_estoque} registro(s) alterado(s).')
                         print(f'[SYNC] Histórico sincronizado. {novos_historico} registro(s) novo(s).')
                         ultimo_erro = None
@@ -1119,6 +1132,7 @@ def rotina_sync():
                             print(f'[SYNC] Todas as {MAX_TENTATIVAS_SYNC} tentativas falharam. Último erro: {e}')
                 if ultimo_erro is not None:
                     registrar_sync_event_pedidos(0, 'erro', str(ultimo_erro)[:180])
+                    registrar_sync_event_pedidos_energy(0, 'erro', str(ultimo_erro)[:180])
                     registrar_sync_event_estoque(0, 'erro', str(ultimo_erro)[:180])
                     registrar_sync_event_historico(0, 'erro', str(ultimo_erro)[:180])
             finally:
@@ -1196,6 +1210,22 @@ def pagina_relatorio_compras_pedidos():
         query_preview=QUERY_PREVIEW_PEDIDOS if pode_ver_query else '',
         pode_ver_query=pode_ver_query,
         **contexto_auth('ProtheusData - Pedidos de Compra')
+    )
+
+
+@app.route('/relatorios/energy/pedidos')
+@acesso_relatorio_requerido('energy', 'pedidos')
+def pagina_relatorio_energy_pedidos():
+    modulo, relatorio = obter_relatorio('energy', 'pedidos')
+    usuario = usuario_atual()
+    pode_ver_query = bool(usuario and (usuario['is_admin'] or usuario['pode_ver_query']))
+    return render_template(
+        'relatorios/energy_pedidos.html',
+        modulo_ativo=modulo,
+        relatorio_ativo=relatorio,
+        query_preview=QUERY_PREVIEW_PEDIDOS_ENERGY if pode_ver_query else '',
+        pode_ver_query=pode_ver_query,
+        **contexto_auth('ProtheusData - Pedidos Energy')
     )
 
 
@@ -2892,6 +2922,113 @@ def api_relatorio_estoque_sync():
         })
     except Exception as e:
         registrar_sync_event_estoque(0, 'erro', str(e)[:180])
+        return jsonify({'erro': 'Falha ao sincronizar com o Protheus.'}), 500
+    finally:
+        sync_lock.release()
+
+
+@app.route('/api/relatorios/energy/pedidos/info', methods=['GET'])
+@acesso_relatorio_requerido('energy', 'pedidos')
+def api_relatorio_energy_pedidos_info():
+    try:
+        total, ultimo_sync, ultimo_sync_status, ultimo_sync_erro = info_relatorio_pedidos_energy()
+        if ultimo_sync:
+            dt = parse_db_datetime(ultimo_sync)
+            ultimo_sync = dt.strftime('%d/%m/%Y %H:%M')
+        else:
+            ultimo_sync = 'Nunca'
+
+        labels = {
+            'sucesso': 'Novos registros',
+            'sem_novos': 'Sem novidades',
+            'erro': 'Falha no sync',
+            'nunca': 'Nunca executado',
+            'alerta': 'Divergência detectada',
+        }
+        return jsonify({
+            'total_registros': total,
+            'ultima_atualizacao': ultimo_sync,
+            'proximo_sync': calcular_proximo_sync(),
+            'ultimo_sync_status': ultimo_sync_status,
+            'ultimo_sync_status_label': labels.get(ultimo_sync_status, 'Desconhecido'),
+            'ultimo_sync_erro': ultimo_sync_erro
+        })
+    except Exception:
+        return jsonify({
+            'total_registros': 'Erro',
+            'ultima_atualizacao': 'Falha ao consultar',
+            'proximo_sync': '--',
+            'ultimo_sync_status': 'erro',
+            'ultimo_sync_status_label': 'Falha ao consultar',
+            'ultimo_sync_erro': None
+        }), 500
+
+
+@app.route('/api/relatorios/energy/pedidos/historico-sync', methods=['GET'])
+@acesso_relatorio_requerido('energy', 'pedidos')
+def api_historico_sync_energy_pedidos():
+    try:
+        historico = []
+        for linha in historico_sync_pedidos_energy():
+            executado_em = linha['executado_em']
+            if executado_em:
+                executado_em = parse_db_datetime(executado_em).strftime('%d/%m/%Y %H:%M')
+            historico.append({
+                'executado_em': executado_em or '--',
+                'registros_novos': linha['registros_novos']
+            })
+        return jsonify({'historico': historico})
+    except Exception:
+        return jsonify({'erro': 'Falha ao carregar histórico de sincronização.'}), 500
+
+
+@app.route('/api/relatorios/energy/pedidos/download', methods=['GET'])
+@acesso_relatorio_requerido('energy', 'pedidos')
+def api_relatorio_energy_pedidos_download():
+    formato = request.args.get('formato', 'csv').lower()
+    data_inicio = _iso_para_protheus(request.args.get('data_inicio'))
+    data_fim    = _iso_para_protheus(request.args.get('data_fim'))
+
+    try:
+        if formato == 'excel':
+            dados, total = gerar_excel_pedidos_energy(data_inicio=data_inicio, data_fim=data_fim)
+            registrar_log('download_energy_pedidos_excel', session.get('usuario_id'), session.get('usuario_nome'))
+            registrar_download(formato, total)
+            return Response(
+                dados,
+                mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                headers={'Content-Disposition': 'attachment; filename=pedidos_energy.xlsx'}
+            )
+        else:
+            dados, total = gerar_csv_pedidos_energy(data_inicio=data_inicio, data_fim=data_fim)
+            registrar_log('download_energy_pedidos_csv', session.get('usuario_id'), session.get('usuario_nome'))
+            registrar_download(formato, total)
+            return Response(
+                dados,
+                mimetype='text/csv',
+                headers={'Content-Disposition': 'attachment; filename=pedidos_energy.csv'}
+            )
+    except Exception:
+        return jsonify({'erro': 'Falha ao gerar relatório.'}), 500
+
+
+@app.route('/api/relatorios/energy/pedidos/sync', methods=['POST'])
+@acesso_relatorio_requerido('energy', 'pedidos')
+def api_relatorio_energy_pedidos_sync():
+    global ultimo_sync_dt
+    if not sync_lock.acquire(blocking=False):
+        return jsonify({'erro': 'Já existe uma sincronização em andamento.'}), 409
+    try:
+        novos = sincronizar_pedidos_energy()
+        ultimo_sync_dt = agora_sp()
+        criar_backup_diario()
+        limpar_logs_antigos()
+        registrar_log('sync_manual_energy_pedidos', session.get('usuario_id'), session.get('usuario_nome'))
+        return jsonify({
+            'mensagem': f'Sincronização concluída. {novos} registro(s) novo(s).'
+        })
+    except Exception as e:
+        registrar_sync_event_pedidos_energy(0, 'erro', str(e)[:180])
         return jsonify({'erro': 'Falha ao sincronizar com o Protheus.'}), 500
     finally:
         sync_lock.release()

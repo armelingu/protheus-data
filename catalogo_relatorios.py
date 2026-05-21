@@ -97,6 +97,14 @@ RELATORIOS_CATALOGO = [
                 'api_base': '/api/relatorios/energy/contas-pagar',
                 'ativo': True,
             },
+            {
+                'id': 'pedidos',
+                'titulo': 'Pedidos de Compra',
+                'descricao': 'Pedidos de compra (SC7) dos compradores do setor Energy.',
+                'path': '/relatorios/energy/pedidos',
+                'api_base': '/api/relatorios/energy/pedidos',
+                'ativo': True,
+            },
         ],
     },
 ]
