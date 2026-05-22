@@ -1314,6 +1314,7 @@ def pagina_gerente():
 # (c) URL "pronta para copiar" ao gerar um token.
 ENDPOINTS_POWER_BI = [
     {'chave': 'compras.pedidos',         'tag': 'Pedidos',          'titulo': 'Pedidos de Compra',     'url_path': '/odata/pedidos'},
+    {'chave': 'energy.pedidos',          'tag': 'Energy Pedidos',   'titulo': 'Pedidos Energy',        'url_path': '/odata/energy-pedidos'},
     {'chave': 'compras.historico',       'tag': 'Histórico',        'titulo': 'Histórico de Pedidos',  'url_path': '/odata/historico-pedidos'},
     {'chave': 'estoque.saldos',          'tag': 'Estoque',          'titulo': 'Saldo em Estoque',      'url_path': '/odata/estoque'},
     {'chave': 'financeiro.nf_entrada',   'tag': 'NF Entrada',       'titulo': 'NF de Entrada',         'url_path': '/odata/nf-entrada'},
@@ -1773,15 +1774,51 @@ _ODATA_METADATA_XML = '''<?xml version="1.0" encoding="utf-8"?>
         <Property Name="FilialOrignal"       Type="Edm.String"/>
       </EntityType>
 
+      <EntityType Name="EnergyPedido">
+        <Key>
+          <PropertyRef Name="filial"/>
+          <PropertyRef Name="pedido_compra"/>
+          <PropertyRef Name="item"/>
+          <PropertyRef Name="nivel_aprovacao"/>
+        </Key>
+        <Property Name="usuario"           Type="Edm.String"/>
+        <Property Name="filial"            Type="Edm.String" Nullable="false"/>
+        <Property Name="pedido_compra"     Type="Edm.String" Nullable="false"/>
+        <Property Name="item"              Type="Edm.String" Nullable="false"/>
+        <Property Name="produto"           Type="Edm.String"/>
+        <Property Name="unidade"           Type="Edm.String"/>
+        <Property Name="descricao_produto" Type="Edm.String"/>
+        <Property Name="quantidade"        Type="Edm.String"/>
+        <Property Name="preco_unitario"    Type="Edm.String"/>
+        <Property Name="preco_total"       Type="Edm.String"/>
+        <Property Name="data_entrega"      Type="Edm.String"/>
+        <Property Name="numero_sc"         Type="Edm.String"/>
+        <Property Name="item_sc"           Type="Edm.String"/>
+        <Property Name="observacoes"       Type="Edm.String"/>
+        <Property Name="classe_valor"      Type="Edm.String"/>
+        <Property Name="qtd_entregue"      Type="Edm.String"/>
+        <Property Name="num_cotacao"       Type="Edm.String"/>
+        <Property Name="moeda"             Type="Edm.String"/>
+        <Property Name="cod_fornecedor"    Type="Edm.String"/>
+        <Property Name="fornecedor"        Type="Edm.String"/>
+        <Property Name="deposito_estoque"  Type="Edm.String"/>
+        <Property Name="data_emissao"      Type="Edm.String"/>
+        <Property Name="nivel_aprovacao"   Type="Edm.String" Nullable="false"/>
+        <Property Name="aprovador"         Type="Edm.String"/>
+        <Property Name="data_aprovacao"    Type="Edm.String"/>
+        <Property Name="status_aprovacao"  Type="Edm.String"/>
+      </EntityType>
+
       <EntityContainer Name="ProtheusDataService">
-        <EntitySet Name="Pedidos"          EntityType="ProtheusData.Pedido"/>
-        <EntitySet Name="Estoque"          EntityType="ProtheusData.EstoqueSaldo"/>
-        <EntitySet Name="HistoricoPedidos" EntityType="ProtheusData.HistoricoPedido"/>
-        <EntitySet Name="NFEntrada"        EntityType="ProtheusData.NFEntrada"/>
-        <EntitySet Name="NFSaida"          EntityType="ProtheusData.NFSaida"/>
-        <EntitySet Name="ContasReceber"    EntityType="ProtheusData.ContasReceber"/>
-        <EntitySet Name="ContasPagar"      EntityType="ProtheusData.ContasPagar"/>
-        <EntitySet Name="MovBancarios"     EntityType="ProtheusData.MovBancario"/>
+        <EntitySet Name="Pedidos"           EntityType="ProtheusData.Pedido"/>
+        <EntitySet Name="EnergyPedidos"     EntityType="ProtheusData.EnergyPedido"/>
+        <EntitySet Name="Estoque"           EntityType="ProtheusData.EstoqueSaldo"/>
+        <EntitySet Name="HistoricoPedidos"  EntityType="ProtheusData.HistoricoPedido"/>
+        <EntitySet Name="NFEntrada"         EntityType="ProtheusData.NFEntrada"/>
+        <EntitySet Name="NFSaida"           EntityType="ProtheusData.NFSaida"/>
+        <EntitySet Name="ContasReceber"     EntityType="ProtheusData.ContasReceber"/>
+        <EntitySet Name="ContasPagar"       EntityType="ProtheusData.ContasPagar"/>
+        <EntitySet Name="MovBancarios"      EntityType="ProtheusData.MovBancario"/>
         <EntitySet Name="EnergyContasPagar" EntityType="ProtheusData.EnergyContasPagar"/>
       </EntityContainer>
 
@@ -2074,6 +2111,7 @@ def odata_service_document():
         '@odata.context': f'{base}/odata/$metadata',
         'value': [
             {'name': 'Pedidos',          'kind': 'EntitySet', 'url': 'pedidos'},
+            {'name': 'EnergyPedidos',    'kind': 'EntitySet', 'url': 'energy-pedidos'},
             {'name': 'Estoque',          'kind': 'EntitySet', 'url': 'estoque'},
             {'name': 'HistoricoPedidos', 'kind': 'EntitySet', 'url': 'historico-pedidos'},
             {'name': 'NFEntrada',        'kind': 'EntitySet', 'url': 'nf-entrada'},
@@ -2125,6 +2163,31 @@ def odata_pedidos():
         colunas=_ODATA_PEDIDOS_COLUNAS,
         order_by='data_emissao DESC, pedido_compra, item, nivel_aprovacao',
         url_path='/odata/pedidos',
+    )
+
+
+_ODATA_ENERGY_PEDIDOS_COLUNAS = [
+    'usuario', 'filial', 'pedido_compra', 'item', 'produto', 'unidade',
+    'descricao_produto', 'quantidade', 'preco_unitario', 'preco_total',
+    'data_entrega', 'numero_sc', 'item_sc', 'observacoes', 'classe_valor',
+    'qtd_entregue', 'num_cotacao', 'moeda', 'cod_fornecedor', 'fornecedor',
+    'deposito_estoque', 'data_emissao', 'nivel_aprovacao', 'aprovador',
+    'data_aprovacao', 'status_aprovacao',
+]
+
+
+@app.route('/odata/energy-pedidos')
+def odata_energy_pedidos():
+    _, erro = _autorizar_odata('energy', 'pedidos', 'Pedidos Energy')
+    if erro:
+        return erro
+    return _odata_paged_response(
+        entity_name='EnergyPedidos',
+        conectar_fn=conectar_pedidos,
+        tabela='pedidos_energy',
+        colunas=_ODATA_ENERGY_PEDIDOS_COLUNAS,
+        order_by='data_emissao DESC, pedido_compra, item, nivel_aprovacao',
+        url_path='/odata/energy-pedidos',
     )
 
 
@@ -2709,7 +2772,6 @@ def api_primeiro_acesso():
     return jsonify({'mensagem': 'Senha atualizada com sucesso.', 'redirect': '/relatorios'}), 200
 
 
-@app.route('/api/relatorio/info', methods=['GET'])
 @app.route('/api/relatorios/compras/pedidos/info', methods=['GET'])
 @acesso_relatorio_requerido('compras', 'pedidos')
 def api_relatorio_info():
@@ -2782,7 +2844,6 @@ def api_relatorio_estoque_info():
         }), 500
 
 
-@app.route('/api/relatorio/historico-sync', methods=['GET'])
 @app.route('/api/relatorios/compras/pedidos/historico-sync', methods=['GET'])
 @acesso_relatorio_requerido('compras', 'pedidos')
 def api_historico_sync():
@@ -2823,7 +2884,6 @@ def api_historico_sync_estoque():
         return jsonify({'erro': 'Falha ao carregar histórico de sincronização.'}), 500
 
 
-@app.route('/api/relatorio/download', methods=['GET'])
 @app.route('/api/relatorios/compras/pedidos/download', methods=['GET'])
 @acesso_relatorio_requerido('compras', 'pedidos')
 def api_relatorio_download():
@@ -2882,7 +2942,6 @@ def api_relatorio_estoque_download():
         return jsonify({'erro': 'Falha ao gerar relatório.'}), 500
 
 
-@app.route('/api/relatorio/sync', methods=['POST'])
 @app.route('/api/relatorios/compras/pedidos/sync', methods=['POST'])
 @acesso_relatorio_requerido('compras', 'pedidos')
 def api_relatorio_sync():
@@ -3835,6 +3894,7 @@ def api_health():
         'status': 'ok',
         'banco_users': 'ok',
         'banco_pedidos': 'ok',
+        'banco_financeiro': 'ok',
         'ultimo_sync': None,
         'hora_servidor': agora_sp().strftime('%Y-%m-%d %H:%M:%S'),
         'timezone': APP_TIMEZONE,
@@ -3853,6 +3913,14 @@ def api_health():
         conn.close()
     except Exception:
         status['banco_pedidos'] = 'erro'
+        status['status'] = 'degradado'
+
+    try:
+        conn = conectar_financeiro()
+        conn.execute('SELECT 1').fetchone()
+        conn.close()
+    except Exception:
+        status['banco_financeiro'] = 'erro'
         status['status'] = 'degradado'
 
     try:

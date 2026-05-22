@@ -917,6 +917,7 @@ def limpar_logs_antigos():
     conn = conectar_pedidos()
     conn.execute('DELETE FROM downloads_log WHERE data_hora IS NOT NULL AND data_hora < ?', (limite_downloads,))
     conn.execute('DELETE FROM sync_log WHERE executado_em IS NOT NULL AND executado_em < ?', (limite_sync,))
+    conn.execute('DELETE FROM pedidos_energy_sync_log WHERE executado_em IS NOT NULL AND executado_em < ?', (limite_sync,))
     conn.execute('DELETE FROM estoque_downloads_log WHERE data_hora IS NOT NULL AND data_hora < ?', (limite_downloads,))
     conn.execute('DELETE FROM estoque_sync_log WHERE executado_em IS NOT NULL AND executado_em < ?', (limite_sync,))
     conn.execute(
