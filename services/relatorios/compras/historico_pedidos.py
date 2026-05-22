@@ -11,7 +11,19 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-SYNC_LOOKBACK_DAYS = int(os.getenv('SYNC_LOOKBACK_DAYS', '30'))
+# Histórico é somente leitura (sem fluxo de aprovação); 30 dias captura emissões tardias.
+# Configurável via SYNC_LOOKBACK_HISTORICO (fallback: SYNC_LOOKBACK_DAYS → 30).
+def _lookback_historico():
+    for chave in ('SYNC_LOOKBACK_HISTORICO', 'SYNC_LOOKBACK_DAYS'):
+        val = os.getenv(chave)
+        if val:
+            try:
+                return max(1, int(val))
+            except (TypeError, ValueError):
+                pass
+    return 30
+
+SYNC_LOOKBACK_DAYS = _lookback_historico()
 
 HISTORICO_DATA_INICIO = '20240101'
 

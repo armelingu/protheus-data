@@ -15,7 +15,19 @@ DB_SERVER = os.getenv('DB_SERVER')
 DB_DATABASE = os.getenv('DB_DATABASE')
 DB_USERNAME = os.getenv('DB_USERNAME')
 DB_PASSWORD = os.getenv('DB_PASSWORD')
-SYNC_LOOKBACK_DAYS = int(os.getenv('SYNC_LOOKBACK_DAYS', '30'))
+# Pedidos podem ter aprovações lançadas semanas após emissão (fluxo multi-nível).
+# Configurável via SYNC_LOOKBACK_PEDIDOS (fallback: SYNC_LOOKBACK_DAYS → 60).
+def _lookback_pedidos():
+    for chave in ('SYNC_LOOKBACK_PEDIDOS', 'SYNC_LOOKBACK_DAYS'):
+        val = os.getenv(chave)
+        if val:
+            try:
+                return max(1, int(val))
+            except (TypeError, ValueError):
+                pass
+    return 60
+
+SYNC_LOOKBACK_DAYS = _lookback_pedidos()
 
 USUARIOS = "('000331', '000189', '000433', '000341', '000430', '000442', '000373', '000286')"
 

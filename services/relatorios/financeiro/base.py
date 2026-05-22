@@ -16,13 +16,18 @@ BATCH_SIZE    = 5000
 DATA_INICIO   = '20240101'
 
 # Janela de resync para capturar atualizações (baixas, alterações de saldo, etc.).
-# Configurável via env SYNC_LOOKBACK_DAYS (default 30 dias). Reduzir cobertura
-# diminui tráfego TDS por hora; aumentar pega baixas atrasadas além de N dias.
-def _lookback_dias():
-    try:
-        return max(1, int(os.environ.get('SYNC_LOOKBACK_DAYS', '30')))
-    except (TypeError, ValueError):
-        return 30
+# Cada módulo passa seu próprio lookback_dias para sincronizar(). Este valor global
+# é o fallback quando nenhum é fornecido (mantém compatibilidade).
+def _lookback_dias(env_especifico=None, default=30):
+    """Lê env_especifico, com fallback para SYNC_LOOKBACK_DAYS e depois para default."""
+    for chave in filter(None, [env_especifico, 'SYNC_LOOKBACK_DAYS']):
+        val = os.environ.get(chave)
+        if val:
+            try:
+                return max(1, int(val))
+            except (TypeError, ValueError):
+                pass
+    return default
 
 LOOKBACK_DIAS = _lookback_dias()
 
@@ -273,11 +278,16 @@ def sincronizar(
     nome_cursor, query_paginada, query_sync_window,
     sqlite_tabela, sync_log_tabela, fn_upsert,
     campo_data_local,
+    lookback_dias=None,
 ):
     """
-    Incremental: busca registros na janela max_data_local - LOOKBACK_DIAS.
+    Incremental: busca registros na janela max_data_local - lookback_dias.
     Captura novos, atualizações (baixas/alterações) E exclusões dentro da janela.
     Se não houver dados locais, faz carga inicial via keyset.
+
+    lookback_dias: dias de janela retroativa. Se None, usa o LOOKBACK_DIAS global
+    (controlado por SYNC_LOOKBACK_DAYS). Cada módulo deve passar seu próprio valor
+    lido via _lookback_dias() para permitir configuração independente por relatório.
 
     A métrica reportada em `registrar_sync` é "mutações REAIS" (novos +
     atualizados + removidos), não "linhas processadas". Sem essa distinção,
@@ -302,7 +312,8 @@ def sincronizar(
         base = datetime.strptime(max_data, '%Y%m%d')
     except ValueError:
         base = datetime.today()
-    data_corte = (base - timedelta(days=LOOKBACK_DIAS)).strftime('%Y%m%d')
+    efetivo = lookback_dias if lookback_dias is not None else LOOKBACK_DIAS
+    data_corte = (base - timedelta(days=efetivo)).strftime('%Y%m%d')
 
     mutacoes = 0
     novos = atualizados = removidos = 0

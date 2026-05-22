@@ -1,9 +1,17 @@
 """SE1010 — Contas a Receber (nomes de campo originais Protheus)."""
+import os
 from .base import (
     DATA_INICIO, BATCH_SIZE, _s, _f,
+    _lookback_dias,
     carga_inicial, sincronizar, info_relatorio, historico_sync,
     gerar_csv, gerar_excel, construir_upsert_sql,
 )
+
+# Janela baseada em E1_VENCTO. Títulos em atraso têm vencimentos antigos mas
+# podem ser baixados meses depois — 365 dias garante que recebimentos tardios
+# sejam capturados no resync horário.
+# Configurável via SYNC_LOOKBACK_TITULOS (fallback: SYNC_LOOKBACK_DAYS → 365).
+LOOKBACK_DIAS = _lookback_dias('SYNC_LOOKBACK_TITULOS', default=365)
 
 TABELA     = 'contas_receber'
 SYNC_LOG   = 'contas_receber_sync_log'
@@ -83,6 +91,7 @@ def sincronizar_contas_receber():
     return sincronizar(
         CURSOR_KEY, QUERY_PAGINADA, QUERY_SYNC_WINDOW,
         TABELA, SYNC_LOG, _upsert, CAMPO_DATA,
+        lookback_dias=LOOKBACK_DIAS,
     )
 
 

@@ -1,9 +1,15 @@
 """SE5010 — Movimentos Bancários (nomes de campo originais Protheus)."""
+import os
 from .base import (
     DATA_INICIO, BATCH_SIZE, _s, _f,
+    _lookback_dias,
     carga_inicial, sincronizar, info_relatorio, historico_sync,
     gerar_csv, gerar_excel, construir_upsert_sql,
 )
+
+# Movimentos bancários raramente são alterados retroativamente; 30 dias suficiente.
+# Configurável via SYNC_LOOKBACK_MOV_BANCARIOS (fallback: SYNC_LOOKBACK_DAYS → 30).
+LOOKBACK_DIAS = _lookback_dias('SYNC_LOOKBACK_MOV_BANCARIOS', default=30)
 
 TABELA     = 'mov_bancarios'
 SYNC_LOG   = 'mov_bancarios_sync_log'
@@ -82,6 +88,7 @@ def sincronizar_mov_bancarios():
     return sincronizar(
         CURSOR_KEY, QUERY_PAGINADA, QUERY_SYNC_WINDOW,
         TABELA, SYNC_LOG, _upsert, CAMPO_DATA,
+        lookback_dias=LOOKBACK_DIAS,
     )
 
 

@@ -11,9 +11,15 @@ tabela local em financeiro.db espelha esses nomes.
 """
 from services.relatorios.financeiro.base import (
     DATA_INICIO, BATCH_SIZE, _s, _f,
+    _lookback_dias,
     carga_inicial, sincronizar, info_relatorio, historico_sync,
     gerar_csv, gerar_excel, construir_upsert_sql,
 )
+
+# Janela baseada em E2_VENCTO (alias Vencimento). Títulos Energy em atraso podem
+# ser baixados meses depois — 365 dias garante captura de pagamentos tardios.
+# Configurável via SYNC_LOOKBACK_TITULOS (fallback: SYNC_LOOKBACK_DAYS → 365).
+LOOKBACK_DIAS = _lookback_dias('SYNC_LOOKBACK_TITULOS', default=365)
 
 TABELA     = 'energy_contas_pagar'
 SYNC_LOG   = 'energy_contas_pagar_sync_log'
@@ -138,6 +144,7 @@ def sincronizar_energy_contas_pagar():
     return sincronizar(
         CURSOR_KEY, QUERY_PAGINADA, QUERY_SYNC_WINDOW,
         TABELA, SYNC_LOG, _upsert, CAMPO_DATA,
+        lookback_dias=LOOKBACK_DIAS,
     )
 
 

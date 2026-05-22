@@ -1,9 +1,15 @@
 """SD2010 — Itens de Notas Fiscais de Saída (nomes de campo originais Protheus)."""
+import os
 from .base import (
     DATA_INICIO, BATCH_SIZE, _s, _f,
+    _lookback_dias,
     carga_inicial, sincronizar, info_relatorio, historico_sync,
     gerar_csv, gerar_excel, construir_upsert_sql,
 )
+
+# NFs são imutáveis após emissão; 30 dias captura entradas tardias.
+# Configurável via SYNC_LOOKBACK_NF (fallback: SYNC_LOOKBACK_DAYS → 30).
+LOOKBACK_DIAS = _lookback_dias('SYNC_LOOKBACK_NF', default=30)
 
 TABELA     = 'nf_saida_itens'
 SYNC_LOG   = 'nf_saida_sync_log'
@@ -90,6 +96,7 @@ def sincronizar_nf_saida():
     return sincronizar(
         CURSOR_KEY, QUERY_PAGINADA, QUERY_SYNC_WINDOW,
         TABELA, SYNC_LOG, _upsert, CAMPO_DATA,
+        lookback_dias=LOOKBACK_DIAS,
     )
 
 

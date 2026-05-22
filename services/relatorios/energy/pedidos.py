@@ -24,7 +24,19 @@ from time_utils import format_protheus_date, parse_protheus_date
 
 load_dotenv()
 
-SYNC_LOOKBACK_DAYS = int(os.getenv('SYNC_LOOKBACK_DAYS', '30'))
+# Pedidos Energy podem ter aprovações lançadas semanas após emissão.
+# Configurável via SYNC_LOOKBACK_PEDIDOS (fallback: SYNC_LOOKBACK_DAYS → 60).
+def _lookback_pedidos():
+    for chave in ('SYNC_LOOKBACK_PEDIDOS', 'SYNC_LOOKBACK_DAYS'):
+        val = os.getenv(chave)
+        if val:
+            try:
+                return max(1, int(val))
+            except (TypeError, ValueError):
+                pass
+    return 60
+
+SYNC_LOOKBACK_DAYS = _lookback_pedidos()
 
 # Compradores do setor Energy (acordado com a área).
 USUARIOS_ENERGY = "('000420', '000466', '000486')"
