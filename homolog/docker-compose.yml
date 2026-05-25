@@ -1,0 +1,29 @@
+name: orders_consult_homolog
+
+services:
+  web:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: orders_consult_homolog
+    ports:
+      - "5006:5000"
+    env_file:
+      - .env
+    environment:
+      TZ: America/Sao_Paulo
+      APP_TIMEZONE: America/Sao_Paulo
+      FLASK_ENV: development
+      TRUST_PROXY_HEADERS: "false"
+      PROTHEUS_CONNECT_TIMEOUT: "30"
+      PROTHEUS_QUERY_TIMEOUT: "60"
+      PROTHEUS_MAX_RETRIES: "2"
+      SYNC_LOOKBACK_PEDIDOS: "60"
+      SYNC_LOOKBACK_HISTORICO: "30"
+      SYNC_LOOKBACK_NF: "30"
+      SYNC_LOOKBACK_MOV_BANCARIOS: "30"
+      SYNC_LOOKBACK_TITULOS: "365"
+      SYNC_LOOKBACK_DAYS: "30"
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

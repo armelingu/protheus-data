@@ -1,3 +1,5 @@
+name: orders_consult_prod
+
 services:
   web:
     build: .

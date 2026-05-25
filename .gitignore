@@ -5,11 +5,13 @@ env/
 
 # Variáveis de ambiente (contém credenciais)
 .env
+homolog/.env
 .env.local
 .env.*.local
 
 # Dados de runtime (bancos, volumes e backups)
 data/
+homolog/data/
 *.db
 *.sqlite
 *.sqlite3
