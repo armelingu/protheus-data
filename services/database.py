@@ -5,7 +5,8 @@ from datetime import datetime, timedelta
 from services.catalogo_relatorios import listar_relatorios_flat
 from services.time_utils import SAO_PAULO_TZ, agora_sp, agora_sp_str
 
-BASE_DIR = os.path.dirname(__file__)
+# Aponta para a raiz do projeto (/app) independente de onde database.py estiver
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, 'data')
 USERS_DB      = os.path.join(DATA_DIR, 'users.db')
 PEDIDOS_DB    = os.path.join(DATA_DIR, 'pedidos.db')
