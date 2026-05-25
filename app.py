@@ -10,8 +10,8 @@ from functools import wraps
 from flask import Flask, request, jsonify, redirect, render_template, send_from_directory, Response, session, g, has_request_context
 from werkzeug.security import check_password_hash, generate_password_hash
 from dotenv import load_dotenv
-from catalogo_relatorios import listar_modulos, listar_relatorios_flat, obter_relatorio, chave_relatorio
-from database import (
+from services.catalogo_relatorios import listar_modulos, listar_relatorios_flat, obter_relatorio, chave_relatorio
+from services.database import (
     conectar_users,
     conectar_pedidos,
     conectar_financeiro,
@@ -100,7 +100,7 @@ from services.relatorios.financeiro.mov_bancarios import (
     QUERY_PAGINADA as QUERY_MOV_BANCARIOS,
 )
 from services.email_service import montar_email_acesso, enviar_email
-from time_utils import APP_TIMEZONE, agora_sp, parse_db_datetime
+from services.time_utils import APP_TIMEZONE, agora_sp, parse_db_datetime
 
 load_dotenv()
 

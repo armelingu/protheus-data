@@ -5,7 +5,7 @@ from decimal import Decimal, InvalidOperation
 
 from dotenv import load_dotenv
 
-from database import conectar_pedidos, agora
+from services.database import conectar_pedidos, agora
 from services.protheus_readonly import executar_select
 
 load_dotenv()

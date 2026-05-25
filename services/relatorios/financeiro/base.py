@@ -9,7 +9,7 @@ Estratégia de extração:
 import csv
 import io
 import os
-from database import conectar_financeiro, agora
+from services.database import conectar_financeiro, agora
 from services.protheus_readonly import executar_select
 
 BATCH_SIZE    = 5000

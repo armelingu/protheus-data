@@ -1,6 +1,6 @@
 from werkzeug.security import generate_password_hash
-from catalogo_relatorios import listar_relatorios_flat
-from database import conectar_users, criar_tabelas, agora
+from services.catalogo_relatorios import listar_relatorios_flat
+from services.database import conectar_users, criar_tabelas, agora
 
 criar_tabelas()
 

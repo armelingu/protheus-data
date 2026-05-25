@@ -2,8 +2,8 @@ import sqlite3
 import os
 from datetime import datetime, timedelta
 
-from catalogo_relatorios import listar_relatorios_flat
-from time_utils import SAO_PAULO_TZ, agora_sp, agora_sp_str
+from services.catalogo_relatorios import listar_relatorios_flat
+from services.time_utils import SAO_PAULO_TZ, agora_sp, agora_sp_str
 
 BASE_DIR = os.path.dirname(__file__)
 DATA_DIR = os.path.join(BASE_DIR, 'data')

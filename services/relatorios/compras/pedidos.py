@@ -5,9 +5,9 @@ from datetime import timedelta
 
 from dotenv import load_dotenv
 
-from database import conectar_pedidos, agora
+from services.database import conectar_pedidos, agora
 from services.protheus_readonly import executar_select
-from time_utils import format_protheus_date, parse_protheus_date
+from services.time_utils import format_protheus_date, parse_protheus_date
 
 load_dotenv()
 
