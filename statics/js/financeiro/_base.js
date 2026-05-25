@@ -17,6 +17,8 @@
     var NOME_RELATORIO  = cfg.nome_relatorio  || 'Relatório';
     var NOME_ARQUIVO    = cfg.nome_arquivo    || 'relatorio';
     var mensagemTimeout = null;
+    var _historicoOffset = 0;
+    var _HISTORICO_LIMIT = 10;
 
     /* ── Auth ──────────────────────────────────────────────────────────────── */
     function verificarAuth(resp) {
@@ -90,7 +92,7 @@
         var info = document.querySelector('.info');
         if (info) info.classList.add('info-loading');
 
-        fetch(API_BASE + '/info')
+        return fetch(API_BASE + '/info')
             .then(function (resp) {
                 if (!verificarAuth(resp)) return null;
                 if (!resp.ok) throw new Error('Erro ao carregar info');
@@ -102,6 +104,9 @@
                 document.getElementById('ultima-atualizacao').textContent = data.ultima_atualizacao;
                 document.getElementById('proximo-sync').textContent       = data.proximo_sync || '--';
                 atualizarStatusSync(data.ultimo_sync_status, data.ultimo_sync_status_label);
+                if (data.ultimo_sync_status === 'erro' && data.erro_resumo) {
+                    mostrarMensagem('Último sync com erro: ' + data.erro_resumo, 'erro');
+                }
                 destacarMetricas();
             })
             .catch(function () {
@@ -122,28 +127,72 @@
             container.innerHTML = '<p class="historico-vazio">Nenhuma atualização registrada até o momento.</p>';
             return;
         }
-        var html = '<div class="historico-lista">';
-        for (var i = 0; i < historico.length; i++) {
-            html += '<div class="historico-item">' +
-                '<span class="historico-data">'        + historico[i].executado_em    + '</span>' +
-                '<span class="historico-quantidade">'  + historico[i].registros_novos + ' alterado(s)</span>' +
-                '</div>';
-        }
-        html += '</div>';
-        container.innerHTML = html;
+        container.innerHTML = '<div class="historico-lista">' + _itensHistorico(historico) + '</div>';
     }
 
-    function carregarHistoricoSync() {
-        fetch(API_BASE + '/historico-sync')
+    function appendHistoricoSync(historico) {
+        var container = document.getElementById('historico-sync');
+        if (!container) return;
+        var lista = container.querySelector('.historico-lista');
+        if (!lista) { renderizarHistoricoSync(historico); return; }
+        lista.insertAdjacentHTML('beforeend', _itensHistorico(historico));
+    }
+
+    var _STATUS_ICON = { sucesso: '✓', sem_novos: '–', erro: '✗' };
+    var _STATUS_CSS  = { sucesso: 'ok', sem_novos: 'neutro', erro: 'erro' };
+
+    function _itensHistorico(historico) {
+        return historico.map(function (h) {
+            var st    = h.status || 'sucesso';
+            var icon  = _STATUS_ICON[st] || '?';
+            var css   = _STATUS_CSS[st]  || '';
+            var quant = (st === 'erro')
+                ? (h.erro_resumo ? h.erro_resumo.substring(0, 80) : 'Erro desconhecido')
+                : h.registros_novos + ' alterado(s)';
+            return '<div class="historico-item ' + css + '">' +
+                '<span class="historico-status-icon">' + icon + '</span>' +
+                '<span class="historico-data">'         + h.executado_em + '</span>' +
+                '<span class="historico-quantidade">'   + quant          + '</span>' +
+                '</div>';
+        }).join('');
+    }
+
+    function atualizarBotaoVerMais(temMais) {
+        var container = document.getElementById('historico-sync');
+        if (!container) return;
+        var btnExistente = document.getElementById('btn-ver-mais-historico');
+        if (btnExistente) btnExistente.remove();
+        if (temMais) {
+            var btn = document.createElement('button');
+            btn.id = 'btn-ver-mais-historico';
+            btn.className = 'historico-ver-mais';
+            btn.textContent = 'Ver mais';
+            btn.addEventListener('click', function () {
+                btn.disabled = true;
+                btn.textContent = 'Carregando...';
+                carregarHistoricoSync(true);
+            });
+            container.appendChild(btn);
+        }
+    }
+
+    function carregarHistoricoSync(append) {
+        var offset = append ? _historicoOffset : 0;
+        if (!append) _historicoOffset = 0;
+        return fetch(API_BASE + '/historico-sync?limit=' + _HISTORICO_LIMIT + '&offset=' + offset)
             .then(function (resp) {
                 if (!verificarAuth(resp)) return null;
                 if (!resp.ok) throw new Error('Erro');
                 return resp.json();
             })
             .then(function (data) {
-                if (data) renderizarHistoricoSync(data.historico || []);
+                if (!data) return;
+                if (append) { appendHistoricoSync(data.historico || []); }
+                else { renderizarHistoricoSync(data.historico || []); }
+                _historicoOffset = offset + (data.historico || []).length;
+                atualizarBotaoVerMais(data.tem_mais);
             })
-            .catch(function () { renderizarHistoricoSync([]); });
+            .catch(function () { if (!append) renderizarHistoricoSync([]); });
     }
 
     /* ── Download ──────────────────────────────────────────────────────────── */
@@ -199,9 +248,34 @@
     }
 
     /* ── Sync manual ───────────────────────────────────────────────────────── */
+    function _iniciarTimerSync(btn) {
+        var segundos = 0;
+        btn.disabled = true;
+        btn.classList.add('is-loading');
+        btn.textContent = 'Sincronizando... 0s';
+        return setInterval(function () {
+            segundos++;
+            btn.textContent = 'Sincronizando... ' + segundos + 's';
+        }, 1000);
+    }
+
+    function _formatarMensagemSync(data, t0) {
+        var duracao = data.duracao_segundos != null
+            ? data.duracao_segundos
+            : Math.round((Date.now() - t0) / 1000);
+        var novos = data.registros_novos != null ? data.registros_novos : null;
+        var partes = ['Sincronização concluída em ' + duracao + 's'];
+        if (novos != null) {
+            partes.push(novos === 0 ? 'nenhum registro novo' : novos + ' registro(s) atualizado(s)');
+        }
+        return partes.join(' · ');
+    }
+
     function atualizarDados() {
         var btn = document.getElementById('btn-sync');
-        definirBotaoCarregando(btn, true, 'Atualizando...');
+        var t0 = Date.now();
+        var timerInterval = _iniciarTimerSync(btn);
+
         mostrarMensagem('Sincronizando ' + NOME_RELATORIO + '...', 'processando');
 
         fetch(API_BASE + '/sync', { method: 'POST' })
@@ -216,14 +290,17 @@
             })
             .then(function (data) {
                 if (!data) return;
-                mostrarMensagem(data.mensagem, 'sucesso');
-                carregarInfo();
-                carregarHistoricoSync();
+                mostrarMensagem(_formatarMensagemSync(data, t0), 'sucesso');
+                _historicoOffset = 0;
+                return Promise.all([carregarInfo(), carregarHistoricoSync(false)]);
             })
             .catch(function (err) {
                 mostrarMensagem(err.message || 'Erro ao sincronizar.', 'erro');
             })
-            .finally(function () { definirBotaoCarregando(btn, false); });
+            .finally(function () {
+                clearInterval(timerInterval);
+                definirBotaoCarregando(btn, false);
+            });
     }
 
     /* ── Init ──────────────────────────────────────────────────────────────── */
@@ -266,7 +343,8 @@
         if (btnBaixar) btnBaixar.addEventListener('click', baixarRelatorio);
         if (btnSync)   btnSync.addEventListener('click', atualizarDados);
 
-        carregarInfo();
-        carregarHistoricoSync();
+        if (btnSync) btnSync.disabled = true;
+        Promise.all([carregarInfo(), carregarHistoricoSync()])
+            .finally(function() { if (btnSync) btnSync.disabled = false; });
     });
 }());

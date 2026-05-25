@@ -48,7 +48,7 @@ SELECT TOP {BATCH_SIZE}
     R_E_C_N_O_,{_CAMPOS}
 FROM SE1010 WITH (NOLOCK)
 WHERE D_E_L_E_T_ = ' '
-  AND E1_EMISSAO >= '{DATA_INICIO}'
+  AND E1_VENCTO >= '{DATA_INICIO}'
   AND R_E_C_N_O_ > ?
 ORDER BY R_E_C_N_O_
 """
@@ -99,8 +99,8 @@ def info_relatorio_contas_receber():
     return info_relatorio(TABELA, SYNC_LOG)
 
 
-def historico_sync_contas_receber(limit=10):
-    return historico_sync(SYNC_LOG, limit)
+def historico_sync_contas_receber(limit=10, offset=0):
+    return historico_sync(SYNC_LOG, limit, offset)
 
 
 def gerar_csv_contas_receber(data_inicio=None, data_fim=None):

@@ -1,3 +1,22 @@
+// Interceptor global: injeta X-CSRF-Token em toda requisição mutante (POST/PUT/DELETE/PATCH).
+// Lê o token do <meta name="csrf-token"> gerado pelo servidor na renderização da página.
+// Todos os arquivos JS do sistema se beneficiam automaticamente sem nenhuma alteração.
+(function() {
+    var _originalFetch = window.fetch;
+    window.fetch = function(url, options) {
+        options = options || {};
+        var method = (options.method || 'GET').toUpperCase();
+        if (method === 'POST' || method === 'PUT' || method === 'DELETE' || method === 'PATCH') {
+            var meta = document.querySelector('meta[name="csrf-token"]');
+            if (meta && meta.getAttribute('content')) {
+                options.headers = Object.assign({}, options.headers || {});
+                options.headers['X-CSRF-Token'] = meta.getAttribute('content');
+            }
+        }
+        return _originalFetch.call(this, url, options);
+    };
+})();
+
 document.addEventListener('DOMContentLoaded', function() {
     var body = document.body;
     var btnLogout = document.querySelector('[data-logout]');

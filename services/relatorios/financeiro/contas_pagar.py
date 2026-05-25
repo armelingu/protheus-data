@@ -22,8 +22,11 @@ TITULO_ABA = 'Contas a Pagar'
 COLUNAS_HEADER = [
     'E2_FILIAL', 'E2_PREFIXO', 'E2_NUM', 'E2_PARCELA', 'E2_TIPO',
     'E2_FORNECE', 'E2_LOJA', 'E2_NOMFOR',
-    'E2_EMISSAO', 'E2_VENCTO', 'E2_VENCREA',
+    'E2_EMISSAO', 'E2_VENCTO', 'E2_VENCREA', 'E2_VENCORI',
     'E2_VALOR', 'E2_SALDO', 'E2_BAIXA',
+    'E2_ISS', 'E2_IRRF', 'E2_DESCONT', 'E2_MULTA', 'E2_JUROS',
+    'E2_CORREC', 'E2_ACRESC', 'E2_DECRESC', 'E2_VALLIQ', 'E2_VLCRUZ',
+    'E2_TXMOEDA', 'E2_DATALIB',
     'E2_NATUREZ', 'E2_HIST',
     'E2_STATUS', 'E2_MOEDA',
     'E2_BCOPAG', 'E2_MOTIVO', 'E2_RATEIO',
@@ -34,8 +37,11 @@ COLUNAS_SELECT = ', '.join(COLUNAS_HEADER)
 _CAMPOS = """
     RTRIM(E2_FILIAL),  RTRIM(E2_PREFIXO), RTRIM(E2_NUM),    RTRIM(E2_PARCELA), RTRIM(E2_TIPO),
     RTRIM(E2_FORNECE), RTRIM(E2_LOJA),    RTRIM(E2_NOMFOR),
-    RTRIM(E2_EMISSAO), RTRIM(E2_VENCTO),  RTRIM(E2_VENCREA),
+    RTRIM(E2_EMISSAO), RTRIM(E2_VENCTO),  RTRIM(E2_VENCREA), RTRIM(E2_VENCORI),
     E2_VALOR,          E2_SALDO,          RTRIM(E2_BAIXA),
+    E2_ISS,            E2_IRRF,           E2_DESCONT,        E2_MULTA,     E2_JUROS,
+    E2_CORREC,         E2_ACRESC,         E2_DECRESC,        E2_VALLIQ,    E2_VLCRUZ,
+    E2_TXMOEDA,        RTRIM(E2_DATALIB),
     RTRIM(E2_NATUREZ), RTRIM(E2_HIST),
     RTRIM(E2_STATUS),  RTRIM(E2_MOEDA),
     RTRIM(E2_BCOPAG),  RTRIM(E2_MOTIVO),  RTRIM(E2_RATEIO)"""
@@ -45,7 +51,7 @@ SELECT TOP {BATCH_SIZE}
     R_E_C_N_O_,{_CAMPOS}
 FROM SE2010 WITH (NOLOCK)
 WHERE D_E_L_E_T_ = ' '
-  AND E2_EMISSAO >= '{DATA_INICIO}'
+  AND E2_VENCTO >= '{DATA_INICIO}'
   AND R_E_C_N_O_ > ?
 ORDER BY R_E_C_N_O_
 """
@@ -68,11 +74,14 @@ def _upsert(conn, linhas):
             int(r[0]),
             _s(r[1]),  _s(r[2]),  _s(r[3]),  _s(r[4]),  _s(r[5]),
             _s(r[6]),  _s(r[7]),  _s(r[8]),
-            _s(r[9]),  _s(r[10]), _s(r[11]),
-            _f(r[12]), _f(r[13]), _s(r[14]),
-            _s(r[15]), _s(r[16]),
-            _s(r[17]), _s(r[18]),
-            _s(r[19]), _s(r[20]), _s(r[21]),
+            _s(r[9]),  _s(r[10]), _s(r[11]), _s(r[12]),          # +VENCORI
+            _f(r[13]), _f(r[14]), _s(r[15]),                     # VALOR, SALDO, BAIXA
+            _f(r[16]), _f(r[17]), _f(r[18]), _f(r[19]), _f(r[20]),  # ISS, IRRF, DESCONT, MULTA, JUROS
+            _f(r[21]), _f(r[22]), _f(r[23]), _f(r[24]), _f(r[25]),  # CORREC, ACRESC, DECRESC, VALLIQ, VLCRUZ
+            _f(r[26]), _s(r[27]),                                 # TXMOEDA, DATALIB
+            _s(r[28]), _s(r[29]),                                 # NATUREZ, HIST
+            _s(r[30]), _s(r[31]),                                 # STATUS, MOEDA
+            _s(r[32]), _s(r[33]), _s(r[34]),                     # BCOPAG, MOTIVO, RATEIO
         )
         for r in linhas
     ]
@@ -95,8 +104,8 @@ def info_relatorio_contas_pagar():
     return info_relatorio(TABELA, SYNC_LOG)
 
 
-def historico_sync_contas_pagar(limit=10):
-    return historico_sync(SYNC_LOG, limit)
+def historico_sync_contas_pagar(limit=10, offset=0):
+    return historico_sync(SYNC_LOG, limit, offset)
 
 
 def gerar_csv_contas_pagar(data_inicio=None, data_fim=None):

@@ -348,6 +348,25 @@
     white-space: nowrap;
 }
 
+.historico-ver-mais {
+    display: block;
+    width: 100%;
+    margin-top: 10px;
+    padding: 7px 0;
+    border: none;
+    border-top: 1px solid #f0f0f0;
+    background: none;
+    color: #7a7a7a;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.4px;
+    text-align: center;
+    cursor: pointer;
+    transition: color 0.15s ease;
+}
+.historico-ver-mais:hover:not(:disabled) { color: #333; }
+.historico-ver-mais:disabled { color: #bbb; cursor: not-allowed; }
+
 /* ── Toast (notificações de "Atualizar dados", download, erros) ─────────── */
 .toast-area {
     position: fixed;

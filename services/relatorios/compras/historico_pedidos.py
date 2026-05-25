@@ -296,13 +296,13 @@ def info_relatorio_historico():
     return total, sync['executado_em'], sync['status'], sync['erro_resumo']
 
 
-def historico_sync_historico(limit=10):
+def historico_sync_historico(limit=10, offset=0):
     conn = conectar_pedidos()
     linhas = conn.execute(
         'SELECT executado_em, registros_novos FROM historico_sync_log '
         'WHERE registros_novos > 0 '
-        'ORDER BY id DESC LIMIT ?',
-        (limit,)
+        'ORDER BY id DESC LIMIT ? OFFSET ?',
+        (limit, offset)
     ).fetchall()
     conn.close()
     return linhas

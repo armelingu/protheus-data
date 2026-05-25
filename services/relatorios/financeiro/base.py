@@ -306,12 +306,17 @@ def sincronizar(
     if not max_data:
         return carga_inicial(nome_cursor, query_paginada, sqlite_tabela, sync_log_tabela, fn_upsert)
 
-    # Calcula data de corte como string YYYYMMDD (formato Protheus)
+    # Calcula data de corte como string YYYYMMDD (formato Protheus).
+    # Cap em hoje: datas de vencimento futuras (dados corrompidos no Protheus, ex: ano 5202)
+    # fariam data_corte ir para o futuro, zerando a janela de sync permanentemente.
     from datetime import datetime, timedelta
+    hoje = datetime.today()
     try:
         base = datetime.strptime(max_data, '%Y%m%d')
     except ValueError:
-        base = datetime.today()
+        base = hoje
+    if base > hoje:
+        base = hoje
     efetivo = lookback_dias if lookback_dias is not None else LOOKBACK_DIAS
     data_corte = (base - timedelta(days=efetivo)).strftime('%Y%m%d')
 
@@ -379,12 +384,13 @@ def info_relatorio(sqlite_tabela, sync_log_tabela):
     return total, sync['executado_em'], sync['status'], sync['erro_resumo']
 
 
-def historico_sync(sync_log_tabela, limit=10):
+def historico_sync(sync_log_tabela, limit=10, offset=0):
     conn = conectar_financeiro()
     try:
         return conn.execute(
-            f'SELECT executado_em, registros_novos FROM {sync_log_tabela} '
-            f'ORDER BY id DESC LIMIT ?', (limit,)
+            f'SELECT executado_em, registros_novos, status, erro_resumo '
+            f'FROM {sync_log_tabela} '
+            f'ORDER BY id DESC LIMIT ? OFFSET ?', (limit, offset)
         ).fetchall()
     finally:
         conn.close()
@@ -417,9 +423,8 @@ def gerar_csv(sqlite_tabela, colunas_header, colunas_select, campo_data,
     """Gera CSV em modo STREAMING.
 
     Devolve (iterador_de_strings, callable_que_retorna_total).
-    O total só é conhecido após exaurir o iterador. O caller deve consumir o
-    iterador (em geral via Response(generator)) e, após terminar, chamar
-    callable_total() para auditoria.
+    O total é pré-contado via COUNT(*) com os mesmos filtros, garantindo
+    auditoria precisa mesmo quando o cliente aborta o download antes do fim.
 
     Footprint: O(_FETCH_CHUNK) linhas em memória de cada vez, em vez de tudo.
     """
@@ -427,7 +432,15 @@ def gerar_csv(sqlite_tabela, colunas_header, colunas_select, campo_data,
         sqlite_tabela, colunas_select, campo_data, data_inicio, data_fim
     )
 
-    contador = {'total': 0}
+    # Pré-conta com os mesmos filtros para auditoria resiliente a abort
+    count_sql, count_params = _construir_query_export(
+        sqlite_tabela, 'COUNT(*)', campo_data, data_inicio, data_fim
+    )
+    conn_count = conectar_financeiro()
+    try:
+        total_pre = conn_count.execute(count_sql, count_params).fetchone()[0]
+    finally:
+        conn_count.close()
 
     def gerar():
         conn = conectar_financeiro()
@@ -447,13 +460,12 @@ def gerar_csv(sqlite_tabela, colunas_header, colunas_select, campo_data,
                     writer.writerow(
                         [str(v).strip() if v is not None else '' for v in linha]
                     )
-                contador['total'] += len(lote)
                 yield buf.getvalue()
                 buf.seek(0); buf.truncate(0)
         finally:
             conn.close()
 
-    return gerar(), (lambda: contador['total'])
+    return gerar(), (lambda: total_pre)
 
 
 def gerar_excel(sqlite_tabela, colunas_header, colunas_select, campo_data,
@@ -462,8 +474,12 @@ def gerar_excel(sqlite_tabela, colunas_header, colunas_select, campo_data,
 
     - write_only: linhas são escritas direto no XML em disco-buffer; nenhum DOM
       mantido em memória além da página atual.
-    - Auto-width single-pass: largura por coluna calculada DURANTE o append em
-      uma única passada — evita o segundo loop O(n*c) da versão antiga.
+    - Auto-width em dois passes: o primeiro pass lê os dados para calcular
+      largura_max; o segundo pass escreve o Excel com as larguras já definidas.
+      Isso é necessário porque em write_only o cabeçalho XML (<cols>) é gravado
+      na primeira chamada a ws.append() — definir column_dimensions após os
+      appends não tem efeito (já foi serializado). O custo extra de dois passes
+      em SQLite local é desprezível.
     - Cabeçalho com estilo (negrito, fundo escuro, branco).
     """
     from openpyxl import Workbook
@@ -475,24 +491,8 @@ def gerar_excel(sqlite_tabela, colunas_header, colunas_select, campo_data,
         sqlite_tabela, colunas_select, campo_data, data_inicio, data_fim
     )
 
-    wb = Workbook(write_only=True)
-    ws = wb.create_sheet(title=titulo_aba[:31])
-
-    header_font  = Font(bold=True, color='FFFFFF')
-    header_fill  = PatternFill('solid', fgColor='1A1A1A')
-    header_align = Alignment(horizontal='center')
-
-    header_cells = []
-    largura_max  = []
-    for nome in colunas_header:
-        cell = WriteOnlyCell(ws, value=nome)
-        cell.font      = header_font
-        cell.fill      = header_fill
-        cell.alignment = header_align
-        header_cells.append(cell)
-        largura_max.append(len(nome))
-    ws.append(header_cells)
-
+    # ── Passo 1: calcular largura máxima por coluna (sem escrever Excel) ──────
+    largura_max = [len(nome) for nome in colunas_header]
     total = 0
     conn = conectar_financeiro()
     try:
@@ -502,19 +502,46 @@ def gerar_excel(sqlite_tabela, colunas_header, colunas_select, campo_data,
             if not lote:
                 break
             for linha in lote:
-                row_vals = [str(v).strip() if v is not None else '' for v in linha]
-                ws.append(row_vals)
-                # auto-width single-pass: rastreia o maior comprimento por coluna
-                for idx, val in enumerate(row_vals):
-                    n = len(val)
+                for idx, val in enumerate(linha):
+                    n = len(str(val).strip() if val is not None else '')
                     if n > largura_max[idx]:
                         largura_max[idx] = n
             total += len(lote)
     finally:
         conn.close()
 
+    # ── Passo 2: montar o Excel com column_dimensions definidos ANTES do
+    #    primeiro ws.append() para que sejam incluídos no <cols> do XML ────────
+    wb = Workbook(write_only=True)
+    ws = wb.create_sheet(title=titulo_aba[:31])
+
     for i, n in enumerate(largura_max, start=1):
         ws.column_dimensions[get_column_letter(i)].width = min(n + 2, 40)
+
+    header_font  = Font(bold=True, color='FFFFFF')
+    header_fill  = PatternFill('solid', fgColor='1A1A1A')
+    header_align = Alignment(horizontal='center')
+
+    header_cells = []
+    for nome in colunas_header:
+        cell = WriteOnlyCell(ws, value=nome)
+        cell.font      = header_font
+        cell.fill      = header_fill
+        cell.alignment = header_align
+        header_cells.append(cell)
+    ws.append(header_cells)
+
+    conn = conectar_financeiro()
+    try:
+        cursor = conn.execute(sql, params)
+        while True:
+            lote = cursor.fetchmany(_FETCH_CHUNK)
+            if not lote:
+                break
+            for linha in lote:
+                ws.append([str(v).strip() if v is not None else '' for v in linha])
+    finally:
+        conn.close()
 
     output = io.BytesIO()
     wb.save(output)

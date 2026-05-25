@@ -193,6 +193,20 @@
 
 .admin-toggle span { line-height: 1.4; }
 
+.admin-toggle input[type="checkbox"]:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+.admin-toggle:has(input:disabled) {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+.admin-query-hint {
+    color: #aaa;
+    font-size: 10px;
+    font-weight: 400;
+}
+
 /* ── Permissions ───────────────────────────────────────────────────────────── */
 .admin-permissions-box {
     padding-top: 14px;
@@ -868,6 +882,18 @@
     .toast-area { top: 14px; right: 14px; left: 14px; width: auto; }
     .aur-edit-actions { flex-direction: column; }
     .aur-edit-actions .admin-btn { width: 100%; }
+}
+
+.admin-aviso-setor {
+    display: block;
+    margin-top: 6px;
+    padding: 8px 12px;
+    background: #fffbe6;
+    border: 1px solid #f0c030;
+    border-radius: 6px;
+    font-size: 12px;
+    color: #7a5c00;
+    line-height: 1.5;
 }
 
 @media (prefers-reduced-motion: reduce) {

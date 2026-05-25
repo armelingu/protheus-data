@@ -681,7 +681,7 @@ def criar_tabelas_financeiro():
             id        INTEGER PRIMARY KEY AUTOINCREMENT,
             recno     INTEGER UNIQUE NOT NULL,
             D1_FILIAL  TEXT, D1_DOC   TEXT, D1_SERIE  TEXT, D1_ITEM   TEXT,
-            D1_FORNECE TEXT, D1_LOJA  TEXT,
+            D1_FORNECE TEXT, D1_LOJA  TEXT, NomeFornecedor TEXT,
             D1_EMISSAO TEXT, D1_DTDIGIT TEXT,
             D1_COD    TEXT,  D1_DESC  TEXT,  D1_UM     TEXT,
             D1_QUANT  REAL,  D1_VUNIT REAL,  D1_TOTAL  REAL,
@@ -693,6 +693,11 @@ def criar_tabelas_financeiro():
             D1_VALDESC REAL, D1_PESO  REAL
         )
     ''')
+    # Migração: adiciona NomeFornecedor a tabelas criadas antes desta versão
+    try:
+        conn.execute('ALTER TABLE nf_entrada_itens ADD COLUMN NomeFornecedor TEXT')
+    except Exception:
+        pass  # coluna já existe
     conn.execute('CREATE INDEX IF NOT EXISTS idx_nf_entrada_emissao    ON nf_entrada_itens(D1_EMISSAO)')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_nf_entrada_fornecedor ON nf_entrada_itens(D1_FORNECE)')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_nf_entrada_produto    ON nf_entrada_itens(D1_COD)')
@@ -712,7 +717,7 @@ def criar_tabelas_financeiro():
             id        INTEGER PRIMARY KEY AUTOINCREMENT,
             recno     INTEGER UNIQUE NOT NULL,
             D2_FILIAL  TEXT, D2_DOC    TEXT, D2_SERIE  TEXT, D2_ITEM   TEXT,
-            D2_CLIENTE TEXT, D2_LOJA   TEXT,
+            D2_CLIENTE TEXT, D2_LOJA   TEXT, NomeCliente TEXT,
             D2_EMISSAO TEXT, D2_DTDIGIT TEXT,
             D2_COD    TEXT,  D2_DESC   TEXT,  D2_UM     TEXT,
             D2_QUANT  REAL,  D2_PRUNIT REAL,  D2_PRCVEN REAL,
@@ -724,6 +729,11 @@ def criar_tabelas_financeiro():
             D2_DESCON REAL,  D2_TIPO   TEXT
         )
     ''')
+    # Migração: adiciona NomeCliente a tabelas criadas antes desta versão
+    try:
+        conn.execute('ALTER TABLE nf_saida_itens ADD COLUMN NomeCliente TEXT')
+    except Exception:
+        pass  # coluna já existe
     conn.execute('CREATE INDEX IF NOT EXISTS idx_nf_saida_emissao  ON nf_saida_itens(D2_EMISSAO)')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_nf_saida_cliente  ON nf_saida_itens(D2_CLIENTE)')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_nf_saida_produto  ON nf_saida_itens(D2_COD)')
@@ -772,13 +782,29 @@ def criar_tabelas_financeiro():
             recno     INTEGER UNIQUE NOT NULL,
             E2_FILIAL  TEXT, E2_PREFIXO TEXT, E2_NUM    TEXT, E2_PARCELA TEXT, E2_TIPO TEXT,
             E2_FORNECE TEXT, E2_LOJA    TEXT, E2_NOMFOR TEXT,
-            E2_EMISSAO TEXT, E2_VENCTO  TEXT, E2_VENCREA TEXT,
+            E2_EMISSAO TEXT, E2_VENCTO  TEXT, E2_VENCREA TEXT, E2_VENCORI TEXT,
             E2_VALOR   REAL, E2_SALDO   REAL, E2_BAIXA  TEXT,
+            E2_ISS     REAL, E2_IRRF    REAL, E2_DESCONT REAL, E2_MULTA  REAL, E2_JUROS  REAL,
+            E2_CORREC  REAL, E2_ACRESC  REAL, E2_DECRESC REAL, E2_VALLIQ REAL, E2_VLCRUZ REAL,
+            E2_TXMOEDA REAL, E2_DATALIB TEXT,
             E2_NATUREZ TEXT, E2_HIST    TEXT,
             E2_STATUS  TEXT, E2_MOEDA   TEXT,
             E2_BCOPAG  TEXT, E2_MOTIVO  TEXT, E2_RATEIO TEXT
         )
     ''')
+    # Migração: adiciona campos financeiros ausentes em tabelas criadas antes desta versão
+    _novos_campos_cp = [
+        ('E2_VENCORI', 'TEXT'), ('E2_ISS',    'REAL'), ('E2_IRRF',    'REAL'),
+        ('E2_DESCONT', 'REAL'), ('E2_MULTA',  'REAL'), ('E2_JUROS',   'REAL'),
+        ('E2_CORREC',  'REAL'), ('E2_ACRESC', 'REAL'), ('E2_DECRESC', 'REAL'),
+        ('E2_VALLIQ',  'REAL'), ('E2_VLCRUZ', 'REAL'), ('E2_TXMOEDA', 'REAL'),
+        ('E2_DATALIB', 'TEXT'),
+    ]
+    for coluna, tipo in _novos_campos_cp:
+        try:
+            conn.execute(f'ALTER TABLE contas_pagar ADD COLUMN {coluna} {tipo}')
+        except Exception:
+            pass  # coluna já existe
     conn.execute('CREATE INDEX IF NOT EXISTS idx_cp_vencimento  ON contas_pagar(E2_VENCTO)')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_cp_emissao     ON contas_pagar(E2_EMISSAO)')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_cp_fornecedor  ON contas_pagar(E2_FORNECE)')
@@ -835,9 +861,14 @@ def criar_tabelas_financeiro():
             BancoPagamento TEXT, DataContabil TEXT, Historico TEXT,
             Saldo          REAL, Desconto REAL, Multa REAL, Juros REAL, Correcao REAL,
             ValorLiquidoBaixado REAL, VencimentoOriginal TEXT, Moeda TEXT, VlrEmReal REAL,
-            Acrescimo      REAL, DataLiberacao TEXT, TaxaMoeda REAL, Decrescimo REAL, FilialOrignal TEXT
+            Acrescimo      REAL, DataLiberacao TEXT, TaxaMoeda REAL, Decrescimo REAL, FilialOriginal TEXT
         )
     ''')
+    # Migração: corrige typo FilialOrignal → FilialOriginal (SQLite 3.25+)
+    try:
+        conn.execute('ALTER TABLE energy_contas_pagar RENAME COLUMN FilialOrignal TO FilialOriginal')
+    except Exception:
+        pass  # coluna já foi renomeada ou SQLite < 3.25
     conn.execute(
         'CREATE INDEX IF NOT EXISTS idx_energy_contas_pagar_vencto '
         'ON energy_contas_pagar(Vencimento)'

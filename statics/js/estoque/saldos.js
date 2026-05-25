@@ -1,9 +1,13 @@
 var API_BASE = '/api/relatorios/estoque/saldos';
 var mensagemTimeout = null;
+var _historicoOffset = 0;
+var _HISTORICO_LIMIT = 10;
 
 document.addEventListener('DOMContentLoaded', function() {
-    carregarInfo();
-    carregarHistoricoSync();
+    var btnSync = document.getElementById('btn-sync');
+    if (btnSync) btnSync.disabled = true;
+    Promise.all([carregarInfo(), carregarHistoricoSync()])
+        .finally(function() { if (btnSync) btnSync.disabled = false; });
 
     var botoes = [
         document.getElementById('btn-baixar'),
@@ -61,7 +65,7 @@ function carregarInfo() {
     var info = document.querySelector('.info');
     info.classList.add('info-loading');
 
-    fetch(API_BASE + '/info')
+    return fetch(API_BASE + '/info')
         .then(function(resp) {
             if (!verificarAuth(resp)) return;
             if (!resp.ok) throw new Error('Erro ao carregar info');
@@ -86,7 +90,10 @@ function carregarInfo() {
 }
 
 function carregarHistoricoSync() {
-    fetch(API_BASE + '/historico-sync')
+    var append = !!arguments[0];
+    var offset = append ? _historicoOffset : 0;
+    if (!append) _historicoOffset = 0;
+    return fetch(API_BASE + '/historico-sync?limit=' + _HISTORICO_LIMIT + '&offset=' + offset)
         .then(function(resp) {
             if (!verificarAuth(resp)) return;
             if (!resp.ok) throw new Error('Erro ao carregar histórico');
@@ -94,10 +101,13 @@ function carregarHistoricoSync() {
         })
         .then(function(data) {
             if (!data) return;
-            renderizarHistoricoSync(data.historico || []);
+            if (append) { appendHistoricoSync(data.historico || []); }
+            else { renderizarHistoricoSync(data.historico || []); }
+            _historicoOffset = offset + (data.historico || []).length;
+            atualizarBotaoVerMais(data.tem_mais);
         })
         .catch(function() {
-            renderizarHistoricoSync([]);
+            if (!append) renderizarHistoricoSync([]);
         });
 }
 
@@ -142,8 +152,9 @@ function baixarRelatorio() {
 
 function atualizarDados() {
     var btn = document.getElementById('btn-sync');
+    var t0 = Date.now();
+    var timerInterval = _iniciarTimerSync(btn);
 
-    definirBotaoCarregando(btn, true, 'Atualizando...');
     mostrarMensagem('Sincronizando posição atual do estoque...', 'processando');
 
     fetch(API_BASE + '/sync', { method: 'POST' })
@@ -158,16 +169,40 @@ function atualizarDados() {
         })
         .then(function(data) {
             if (!data) return;
-            mostrarMensagem(data.mensagem, 'sucesso');
-            carregarInfo();
-            carregarHistoricoSync();
+            mostrarMensagem(_formatarMensagemSync(data, t0), 'sucesso');
+            _historicoOffset = 0;
+            return Promise.all([carregarInfo(), carregarHistoricoSync(false)]);
         })
         .catch(function(err) {
             mostrarMensagem(err.message || 'Erro ao sincronizar.', 'erro');
         })
         .finally(function() {
+            clearInterval(timerInterval);
             definirBotaoCarregando(btn, false);
         });
+}
+
+function _iniciarTimerSync(btn) {
+    var segundos = 0;
+    btn.disabled = true;
+    btn.classList.add('is-loading');
+    btn.textContent = 'Sincronizando... 0s';
+    return setInterval(function() {
+        segundos++;
+        btn.textContent = 'Sincronizando... ' + segundos + 's';
+    }, 1000);
+}
+
+function _formatarMensagemSync(data, t0) {
+    var duracao = data.duracao_segundos != null
+        ? data.duracao_segundos
+        : Math.round((Date.now() - t0) / 1000);
+    var novos = data.registros_novos != null ? data.registros_novos : null;
+    var partes = ['Sincronização concluída em ' + duracao + 's'];
+    if (novos != null) {
+        partes.push(novos === 0 ? 'nenhum registro novo' : novos + ' registro(s) atualizado(s)');
+    }
+    return partes.join(' · ');
 }
 
 function mostrarMensagem(texto, tipo) {
@@ -201,23 +236,45 @@ function esconderMensagem() {
 
 function renderizarHistoricoSync(historico) {
     var container = document.getElementById('historico-sync');
-
     if (!historico.length) {
         container.innerHTML = '<p class="historico-vazio">Nenhuma atualização registrada até o momento.</p>';
         return;
     }
+    container.innerHTML = '<div class="historico-lista">' + _itensHistorico(historico) + '</div>';
+}
 
-    var html = '<div class="historico-lista">';
+function appendHistoricoSync(historico) {
+    var container = document.getElementById('historico-sync');
+    var lista = container.querySelector('.historico-lista');
+    if (!lista) { renderizarHistoricoSync(historico); return; }
+    lista.insertAdjacentHTML('beforeend', _itensHistorico(historico));
+}
 
-    for (var i = 0; i < historico.length; i++) {
-        html += '<div class="historico-item">' +
-            '<span class="historico-data">' + historico[i].executado_em + '</span>' +
-            '<span class="historico-quantidade">' + historico[i].registros_novos + ' alterado(s)</span>' +
+function _itensHistorico(historico) {
+    return historico.map(function(h) {
+        return '<div class="historico-item">' +
+            '<span class="historico-data">' + h.executado_em + '</span>' +
+            '<span class="historico-quantidade">' + h.registros_novos + ' alterado(s)</span>' +
         '</div>';
-    }
+    }).join('');
+}
 
-    html += '</div>';
-    container.innerHTML = html;
+function atualizarBotaoVerMais(temMais) {
+    var container = document.getElementById('historico-sync');
+    var btnExistente = document.getElementById('btn-ver-mais-historico');
+    if (btnExistente) btnExistente.remove();
+    if (temMais) {
+        var btn = document.createElement('button');
+        btn.id = 'btn-ver-mais-historico';
+        btn.className = 'historico-ver-mais';
+        btn.textContent = 'Ver mais';
+        btn.addEventListener('click', function() {
+            btn.disabled = true;
+            btn.textContent = 'Carregando...';
+            carregarHistoricoSync(true);
+        });
+        container.appendChild(btn);
+    }
 }
 
 function atualizarStatusSync(status, label) {

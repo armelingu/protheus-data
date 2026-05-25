@@ -43,7 +43,7 @@ COLUNAS_HEADER = [
     'BancoPagamento', 'DataContabil', 'Historico',
     'Saldo', 'Desconto', 'Multa', 'Juros', 'Correcao',
     'ValorLiquidoBaixado', 'VencimentoOriginal', 'Moeda', 'VlrEmReal',
-    'Acrescimo', 'DataLiberacao', 'TaxaMoeda', 'Decrescimo', 'FilialOrignal',
+    'Acrescimo', 'DataLiberacao', 'TaxaMoeda', 'Decrescimo', 'FilialOriginal',
 ]
 COLUNAS_SELECT = ', '.join(COLUNAS_HEADER)
 
@@ -85,7 +85,7 @@ _CAMPOS = """
     RTRIM(E2_DATALIB) AS DataLiberacao,
     E2_TXMOEDA        AS TaxaMoeda,
     E2_DECRESC        AS Decrescimo,
-    RTRIM(E2_FILORIG) AS FilialOrignal"""
+    RTRIM(E2_FILORIG) AS FilialOriginal"""
 
 # Filtro do negócio Energy (sempre aplicado)
 _FILTRO_ENERGY = (
@@ -152,8 +152,8 @@ def info_relatorio_energy_contas_pagar():
     return info_relatorio(TABELA, SYNC_LOG)
 
 
-def historico_sync_energy_contas_pagar(limit=10):
-    return historico_sync(SYNC_LOG, limit)
+def historico_sync_energy_contas_pagar(limit=10, offset=0):
+    return historico_sync(SYNC_LOG, limit, offset)
 
 
 def gerar_csv_energy_contas_pagar(data_inicio=None, data_fim=None):

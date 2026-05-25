@@ -41,7 +41,15 @@
         </section>
         {% endfor %}
         {% else %}
-        <div class="dashboard-vazio">Nenhum relatório está liberado para o seu usuário no momento.</div>
+        <div class="dashboard-sem-acesso">
+            <p class="dashboard-sem-acesso-icone">🔒</p>
+            {% if motivo_sem_acesso %}
+            <p class="dashboard-sem-acesso-texto">{{ motivo_sem_acesso | safe }}</p>
+            {% else %}
+            <p class="dashboard-sem-acesso-texto">Nenhum relatório está liberado para o seu usuário no momento.</p>
+            {% endif %}
+            <p class="dashboard-sem-acesso-dica">Se o problema persistir, fale com o administrador do sistema.</p>
+        </div>
         {% endif %}
     </div>
 </section>

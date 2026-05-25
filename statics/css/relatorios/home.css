@@ -171,6 +171,32 @@
     outline-offset: 2px;
 }
 
+.dashboard-sem-acesso {
+    grid-column: 1 / -1;
+    padding: 48px 24px;
+    text-align: center;
+    background: #fafafa;
+    border: 1px dashed #e0e0e0;
+    border-radius: 10px;
+}
+
+.dashboard-sem-acesso-icone {
+    font-size: 32px;
+    margin-bottom: 12px;
+}
+
+.dashboard-sem-acesso-texto {
+    font-size: 14px;
+    color: #444;
+    margin-bottom: 8px;
+    line-height: 1.6;
+}
+
+.dashboard-sem-acesso-dica {
+    font-size: 12px;
+    color: #999;
+}
+
 @keyframes fadeIn {
     from { opacity: 0; transform: translateY(8px); }
     to { opacity: 1; transform: translateY(0); }

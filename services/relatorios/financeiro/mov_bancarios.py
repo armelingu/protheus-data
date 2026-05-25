@@ -63,20 +63,25 @@ INSERT_SQL = construir_upsert_sql(TABELA, COLUNAS_HEADER)
 
 
 def _upsert(conn, linhas):
-    dados = [
-        (
+    dados = []
+    for r in linhas:
+        # E5_VALOR é sempre positivo no Protheus; E5_RECPAG='P' indica pagamento
+        # (saída de caixa) — deve ser armazenado com sinal negativo para uso analítico.
+        recpag = _s(r[7])
+        valor  = _f(r[6])
+        if recpag == 'P':
+            valor = -abs(valor)
+        dados.append((
             int(r[0]),
             _s(r[1]),  _s(r[2]),  _s(r[3]),  _s(r[4]),
-            _s(r[5]),  _f(r[6]),  _s(r[7]),
+            _s(r[5]),  valor,     recpag,
             _s(r[8]),  _s(r[9]),  _s(r[10]),
             _s(r[11]), _s(r[12]), _s(r[13]),
             _s(r[14]), _s(r[15]),
             _s(r[16]), _s(r[17]), _s(r[18]),
             _s(r[19]), _s(r[20]),
             _s(r[21]), _s(r[22]), _s(r[23]),
-        )
-        for r in linhas
-    ]
+        ))
     conn.executemany(INSERT_SQL, dados)
 
 
@@ -96,8 +101,8 @@ def info_relatorio_mov_bancarios():
     return info_relatorio(TABELA, SYNC_LOG)
 
 
-def historico_sync_mov_bancarios(limit=10):
-    return historico_sync(SYNC_LOG, limit)
+def historico_sync_mov_bancarios(limit=10, offset=0):
+    return historico_sync(SYNC_LOG, limit, offset)
 
 
 def gerar_csv_mov_bancarios(data_inicio=None, data_fim=None):

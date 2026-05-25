@@ -17,23 +17,73 @@ document.addEventListener('DOMContentLoaded', function() {
             .then(function(r) { return r.json(); })
             .then(function(d) {
                 setoresCache = d.setores || [];
-                var opts = '<option value="">— Sem setor —</option>';
+                // DOM API — elimina risco de XSS via innerHTML com dados do servidor
+                while (novoSetorEl.firstChild) novoSetorEl.removeChild(novoSetorEl.firstChild);
+                var defaultOpt = document.createElement('option');
+                defaultOpt.value = '';
+                defaultOpt.textContent = '— Sem setor —';
+                novoSetorEl.appendChild(defaultOpt);
                 setoresCache.forEach(function(s) {
-                    if (s.ativo) opts += '<option value="' + s.id + '">' + escapeHtml(s.nome) + '</option>';
+                    if (!s.ativo) return;
+                    var opt = document.createElement('option');
+                    opt.value = String(parseInt(s.id, 10));
+                    opt.textContent = s.nome;
+                    novoSetorEl.appendChild(opt);
                 });
-                novoSetorEl.innerHTML = opts;
+                // Aviso e pré-seleção de permissões quando setor for selecionado
+                novoSetorEl.addEventListener('change', function() {
+                    verificarAvisoSetor(novoSetorEl, 'aviso-setor-novo');
+                    aplicarPermissoesSetorNovoCadastro();
+                });
             })
             .catch(function() {});
+    }
+
+    function verificarAvisoSetor(selectEl, avisoId) {
+        var avisoEl = document.getElementById(avisoId);
+        if (!avisoEl) return;
+        var setor = setoresCache.find(function(s) {
+            return String(parseInt(s.id, 10)) === selectEl.value;
+        });
+        if (setor && (!setor.permissoes || setor.permissoes.length === 0)) {
+            avisoEl.textContent = '⚠ Este setor não tem relatórios configurados. O usuário não verá nenhum relatório até que o setor seja configurado.';
+            avisoEl.style.display = 'block';
+        } else {
+            avisoEl.style.display = 'none';
+        }
+    }
+
+    function aplicarPermissoesSetorNovoCadastro() {
+        if (novoIsAdmin.checked) return;
+        var setorId = novoSetorEl.value;
+        var checkboxes = novoPermissoes.querySelectorAll('input[type="checkbox"]');
+        if (!setorId) {
+            // Sem setor: marcar todos (comportamento padrão)
+            checkboxes.forEach(function(cb) { cb.checked = true; });
+        } else {
+            var setor = setoresCache.find(function(s) {
+                return String(parseInt(s.id, 10)) === setorId;
+            });
+            var perms = (setor && setor.permissoes) ? setor.permissoes : [];
+            checkboxes.forEach(function(cb) {
+                cb.checked = perms.indexOf(cb.value) >= 0;
+            });
+        }
+        if (novoPermissoesAll) {
+            atualizarEstadoToggleTodos(novoPermissoesAll, novoPermissoes);
+        }
     }
 
     function montarSetorSelectHtml(selecionado, prefixo) {
         var opts = '<option value="">— Sem setor —</option>';
         setoresCache.forEach(function(s) {
             if (!s.ativo) return;
-            var sel = String(s.id) === String(selecionado) ? 'selected' : '';
-            opts += '<option value="' + s.id + '" ' + sel + '>' + escapeHtml(s.nome) + '</option>';
+            var safeId = parseInt(s.id, 10);
+            var sel = String(safeId) === String(selecionado) ? 'selected' : '';
+            opts += '<option value="' + safeId + '" ' + sel + '>' + escapeHtml(s.nome) + '</option>';
         });
-        return '<select class="js-setor-id" id="' + (prefixo || 'setor') + '">' + opts + '</select>';
+        var safePrefix = escapeHtml(prefixo || 'setor');
+        return '<select class="js-setor-id" id="' + safePrefix + '">' + opts + '</select>';
     }
 
     /* ── helpers ──────────────────────────────────────────────────────────── */
@@ -148,6 +198,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
     /* ── renderizar linha de usuário ─────────────────────────────────────── */
     function renderizarLinhaUsuario(u) {
+            var uid = parseInt(u.id, 10);
+
             /* badges de status */
             var badgeAtivo = u.ativo
                 ? '<span class="admin-badge is-ok">Ativo</span>'
@@ -161,7 +213,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
             return [
                 /* ── linha recolhida ── */
-                '<details class="admin-user-row" data-user-id="' + u.id + '">',
+                '<details class="admin-user-row" data-user-id="' + uid + '">',
                 '<summary class="admin-user-summary">',
 
                 /* col: identidade */
@@ -196,7 +248,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 '<span class="aur-section-label">Perfil de acesso</span>',
                 '<div style="margin-bottom:10px">',
                 '<label class="admin-field" style="max-width:240px"><span>Setor</span>',
-                montarSetorSelectHtml(u.setor_id, 'setor-' + u.id),
+                montarSetorSelectHtml(u.setor_id, 'setor-' + uid),
                 '</label>',
                 '</div>',
                 '<div class="aur-toggles">',
@@ -209,8 +261,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 '<span>Gerente do setor</span>',
                 '</label>',
                 '<label class="admin-toggle">',
-                '<input type="checkbox" class="js-pode-ver-query" ' + (u.pode_ver_query ? 'checked' : '') + '>',
-                '<span>Pode ver a query SQL dos relatórios</span>',
+                '<input type="checkbox" class="js-pode-ver-query" ' + (u.pode_ver_query ? 'checked' : '') + (u.is_admin ? '' : ' disabled') + '>',
+                '<span>Pode ver a query SQL dos relatórios <span class="admin-query-hint">(requer Administrador)</span></span>',
                 '</label>',
                 '</div>',
                 '</div>',
@@ -223,7 +275,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 '<span>Selecionar todos os relatórios</span>',
                 '</label>',
                 '<div class="admin-permissions-grid js-permissoes">',
-                montarPermissoesHtml('permissoes-' + u.id, u.permissoes, u.is_admin),
+                montarPermissoesHtml('permissoes-' + uid, u.permissoes, u.is_admin),
                 '</div>',
                 '</div>',
 
@@ -329,6 +381,11 @@ document.addEventListener('DOMContentLoaded', function() {
             var grid = card.querySelector('.js-permissoes');
             if (grid) atualizarEstadoToggleTodos(toggle, grid);
         }
+        var queryToggle = card.querySelector('.js-pode-ver-query');
+        if (queryToggle) {
+            queryToggle.disabled = !isAdmin;
+            if (!isAdmin) queryToggle.checked = false;
+        }
     }
 
     /* ── formulário de criação: sincronizar estado ────────────────────────── */
@@ -338,6 +395,10 @@ document.addEventListener('DOMContentLoaded', function() {
             input.disabled = desabilitar;
         });
         if (novoPermissoesAll) novoPermissoesAll.disabled = desabilitar;
+        if (novoQueryToggle) {
+            novoQueryToggle.disabled = !novoIsAdmin.checked;
+            if (!novoIsAdmin.checked) novoQueryToggle.checked = false;
+        }
     }
 
     function renderizarCatalogoCriacao() {
@@ -375,7 +436,7 @@ document.addEventListener('DOMContentLoaded', function() {
     formCriar.addEventListener('submit', function(event) {
         event.preventDefault();
         var email = formCriar.email.value.trim().toLowerCase();
-        if (!/@(hbraviacao|hbrenergy)\.com\.br$/.test(email)) {
+        if (!/^[^\s@]+@(hbraviacao|hbrenergy)\.com\.br$/.test(email)) {
             mostrarMensagem('Use um e-mail corporativo @hbraviacao.com.br ou @hbrenergy.com.br.', 'erro');
             return;
         }

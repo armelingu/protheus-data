@@ -2,6 +2,7 @@ import os
 import json
 import re
 import time
+import hmac
 import secrets
 import threading
 from datetime import timedelta
@@ -146,12 +147,60 @@ except ImportError:
     print('[WARN] flask_compress não instalado — respostas sairão sem gzip.')
 
 
+def _gerar_csrf_token():
+    """Gera e persiste um token CSRF na sessão. Idempotente."""
+    if 'csrf_token' not in session:
+        session['csrf_token'] = secrets.token_hex(32)
+        session.modified = True
+    return session['csrf_token']
+
+
 @app.before_request
 def renovar_sessao():
-    """Garante que toda requisição autenticada renova o prazo da sessão."""
+    """Garante que toda requisição autenticada renova o prazo da sessão e possui CSRF token."""
     if session.get('usuario_id'):
         session.permanent = True
         session.modified = True
+        _gerar_csrf_token()
+
+
+@app.before_request
+def _validar_csrf():
+    """Valida X-CSRF-Token em mutações de estado para rotas autenticadas por sessão.
+
+    Rotas excluídas:
+    - Métodos seguros (GET, HEAD, OPTIONS)
+    - Prefixo /odata/ — autenticadas por Bearer token, não por cookie de sessão
+    - Requisições sem sessão ativa — a rota própria rejeitará via @login_requerido
+    """
+    if request.method in ('GET', 'HEAD', 'OPTIONS'):
+        return
+    if request.path.startswith('/odata/'):
+        return
+    if not session.get('usuario_id'):
+        return
+
+    token_sessao  = session.get('csrf_token', '')
+    token_recebido = request.headers.get('X-CSRF-Token', '')
+
+    if not token_sessao or not hmac.compare_digest(token_sessao, token_recebido):
+        return jsonify({'erro': 'Requisição inválida. Recarregue a página e tente novamente.'}), 403
+
+
+@app.context_processor
+def _injetar_csrf_token():
+    """Disponibiliza {{ csrf_token }} em todos os templates Jinja2."""
+    if session.get('usuario_id'):
+        return {'csrf_token': _gerar_csrf_token()}
+    return {'csrf_token': ''}
+
+
+@app.route('/api/csrf-token', methods=['GET'])
+def api_csrf_token():
+    """Retorna o token CSRF da sessão atual (útil para diagnóstico e testes)."""
+    if not session.get('usuario_id'):
+        return jsonify({'erro': 'Não autenticado.'}), 401
+    return jsonify({'csrf_token': _gerar_csrf_token()})
 
 
 @app.after_request
@@ -176,6 +225,24 @@ SYNC_INTERVALO = 3600
 MAX_TENTATIVAS_LOGIN = 5
 BLOQUEIO_MINUTOS = 5
 EMAIL_CORPORATIVOS_DOMINIOS = ('hbraviacao.com.br', 'hbrenergy.com.br')
+
+# Quando TRUST_PROXY_HEADERS=true, lê o IP real do cliente via X-Forwarded-For
+# (definido pelo proxy/Nginx). Manter false se o app estiver exposto diretamente.
+_TRUST_PROXY = os.getenv('TRUST_PROXY_HEADERS', 'false').lower() == 'true'
+
+
+def _obter_ip_real():
+    """Retorna o IP real do cliente, respeitando proxies se configurado.
+
+    Com TRUST_PROXY_HEADERS=true: usa o primeiro IP de X-Forwarded-For,
+    que é o IP original do cliente antes de passar pelo proxy/Nginx.
+    Sem a flag: usa request.remote_addr diretamente (seguro em deploy sem proxy).
+    """
+    if _TRUST_PROXY:
+        xff = request.headers.get('X-Forwarded-For', '')
+        if xff:
+            return xff.split(',')[0].strip()
+    return request.remote_addr or '0.0.0.0'
 ROTAS_LIBERADAS_TROCA_SENHA = {'/primeiro-acesso', '/api/primeiro-acesso', '/api/logout', '/favicon.ico'}
 
 ultimo_sync_dt = None
@@ -234,7 +301,7 @@ def obter_ultimo_email_usuario(usuario_id):
 
 def normalizar_email_corporativo(email):
     email_normalizado = (email or '').strip().lower()
-    if not email_normalizado or '@' not in email_normalizado:
+    if not email_normalizado or email_normalizado.count('@') != 1:
         raise ValueError('Informe um e-mail corporativo válido.')
 
     login, dominio = email_normalizado.split('@', 1)
@@ -433,16 +500,20 @@ def salvar_permissoes_setor(setor_id, permissoes, conn=None):
     if fechar:
         conn = conectar_users()
     conn.execute('DELETE FROM setor_permissoes_relatorio WHERE setor_id=?', (setor_id,))
+    agora_atual = agora()
+    valores = []
     for chave in permissoes:
         # chave pode ser 'modulo.relatorio' (ponto) ou 'modulo:relatorio' (dois-pontos)
         sep = '.' if '.' in chave else ':'
         partes = chave.split(sep, 1)
         if len(partes) == 2:
-            conn.execute(
-                'INSERT OR IGNORE INTO setor_permissoes_relatorio '
-                '(setor_id, modulo_id, relatorio_id, criado_em) VALUES (?,?,?,?)',
-                (setor_id, partes[0], partes[1], agora())
-            )
+            valores.append((setor_id, partes[0], partes[1], agora_atual))
+    if valores:
+        conn.executemany(
+            'INSERT OR IGNORE INTO setor_permissoes_relatorio '
+            '(setor_id, modulo_id, relatorio_id, criado_em) VALUES (?,?,?,?)',
+            valores
+        )
     if fechar:
         conn.commit()
         conn.close()
@@ -500,7 +571,10 @@ def usuario_tem_acesso_relatorio(usuario, modulo_id, relatorio_id):
     setor_id = usuario['setor_id'] if 'setor_id' in usuario.keys() else None
     if setor_id:
         perms_setor = obter_relatorios_permitidos_setor(setor_id)
-        return usuario_tem and chave in perms_setor
+        # Setor sem permissões configuradas = sem restrição de setor (não bloqueia).
+        # Setor com permissões configuradas = usuário precisa ter E setor ter o relatório.
+        if perms_setor:
+            return usuario_tem and chave in perms_setor
     return usuario_tem
 
 
@@ -522,7 +596,8 @@ def filtrar_modulos_usuario(usuario):
             else:
                 chave = chave_relatorio(modulo['id'], relatorio['id'])
                 tem_usuario = chave in permissoes_usuario
-                tem_setor   = permissoes_setor is None or chave in permissoes_setor
+                # not permissoes_setor: setor sem permissões configuradas (None ou set vazio) = sem restrição
+                tem_setor   = not permissoes_setor or chave in permissoes_setor
                 if tem_usuario and tem_setor:
                     relatorios.append(relatorio)
         if relatorios:
@@ -574,7 +649,7 @@ def registrar_auditoria_admin(
                 _json_dump(antes),
                 _json_dump(depois),
                 detalhe,
-                request.remote_addr,
+                _obter_ip_real(),
                 agora(),
             )
         )
@@ -665,7 +740,7 @@ def registrar_log(acao, usuario_id=None, usuario_nome=None):
     conn = conectar_users()
     conn.execute(
         'INSERT INTO logs_acesso (usuario_id, usuario_nome, acao, ip, data_hora) VALUES (?, ?, ?, ?, ?)',
-        (usuario_id, usuario_nome, acao, request.remote_addr, agora())
+        (usuario_id, usuario_nome, acao, _obter_ip_real(), agora())
     )
     conn.commit()
     conn.close()
@@ -740,10 +815,15 @@ def listar_usuarios_admin():
     ).fetchall()
     emails = conn.execute(
         '''
-        SELECT usuario_id, status, tentativas, ultimo_erro, criado_em, enviado_em, atualizado_em
-        FROM emails_usuarios_log
-        WHERE tipo = 'acesso'
-        ORDER BY id DESC
+        SELECT e.usuario_id, e.status, e.tentativas, e.ultimo_erro,
+               e.criado_em, e.enviado_em, e.atualizado_em
+        FROM emails_usuarios_log e
+        INNER JOIN (
+            SELECT usuario_id, MAX(id) AS max_id
+            FROM emails_usuarios_log
+            WHERE tipo = 'acesso'
+            GROUP BY usuario_id
+        ) m ON e.id = m.max_id
         '''
     ).fetchall()
     conn.close()
@@ -754,11 +834,7 @@ def listar_usuarios_admin():
             chave_relatorio(linha['modulo_id'], linha['relatorio_id'])
         )
 
-    emails_por_usuario = {}
-    for linha in emails:
-        if linha['usuario_id'] in emails_por_usuario:
-            continue
-        emails_por_usuario[linha['usuario_id']] = linha
+    emails_por_usuario = {linha['usuario_id']: linha for linha in emails}
 
     usuarios_serializados = []
     for usuario in usuarios:
@@ -1075,73 +1151,77 @@ def agendar_proximo_sync():
 
 def rotina_sync():
     global ultimo_sync_dt
-    hora_atual = agora_sp().hour
-    if 8 <= hora_atual < 19:
-        if not sync_lock.acquire(blocking=False):
-            print('[SYNC] Sincronização já em andamento. Pulando execução automática.')
+    try:
+        hora_atual = agora_sp().hour
+        if 8 <= hora_atual < 19:
+            if not sync_lock.acquire(blocking=False):
+                print('[SYNC] Sincronização já em andamento. Pulando execução automática.')
+            else:
+                MAX_TENTATIVAS_SYNC = 3
+                ultimo_erro = None
+                try:
+                    for tentativa in range(1, MAX_TENTATIVAS_SYNC + 1):
+                        try:
+                            novos_pedidos        = sincronizar_pedidos()
+                            novos_pedidos_energy = sincronizar_pedidos_energy()
+                            alterados_estoque    = sincronizar_estoque()
+                            novos_historico      = sincronizar_historico()
+
+                            # Módulo Financeiro — paralelo (cada job tem sua própria
+                            # conexão pyodbc + conexão SQLite; financeiro.db está em
+                            # WAL, suporta leituras/escritas concorrentes).
+                            _fin_syncs = [
+                                ('NF Entrada',           sincronizar_nf_entrada),
+                                ('NF Saída',             sincronizar_nf_saida),
+                                ('Contas a Receber',     sincronizar_contas_receber),
+                                ('Contas a Pagar',       sincronizar_contas_pagar),
+                                ('Movimentos Bancários', sincronizar_mov_bancarios),
+                                ('Energy — Contas a Pagar', sincronizar_energy_contas_pagar),
+                            ]
+                            from concurrent.futures import ThreadPoolExecutor, as_completed
+                            with ThreadPoolExecutor(max_workers=3, thread_name_prefix='fin-sync') as ex:
+                                futs = {ex.submit(_fn_f): _nome_f for _nome_f, _fn_f in _fin_syncs}
+                                for fut in as_completed(futs):
+                                    _nome_f = futs[fut]
+                                    try:
+                                        _tot_f = fut.result()
+                                        print(f'[SYNC] Financeiro — {_nome_f}: {_tot_f} registro(s) processado(s).')
+                                    except Exception as _e_f:
+                                        print(f'[SYNC] Financeiro — {_nome_f}: erro: {_e_f}')
+
+                            ultimo_sync_dt = agora_sp()
+                            if criar_backup_diario():
+                                print('[BACKUP] Backup diário criado com sucesso.')
+                            print(f'[SYNC] Pedidos sincronizados. {novos_pedidos} registro(s) novo(s).')
+                            print(f'[SYNC] Pedidos Energy sincronizados. {novos_pedidos_energy} registro(s) novo(s).')
+                            print(f'[SYNC] Estoque sincronizado. {alterados_estoque} registro(s) alterado(s).')
+                            print(f'[SYNC] Histórico sincronizado. {novos_historico} registro(s) novo(s).')
+                            ultimo_erro = None
+                            break
+                        except Exception as e:
+                            ultimo_erro = e
+                            if tentativa < MAX_TENTATIVAS_SYNC:
+                                espera = 60 * tentativa
+                                print(f'[SYNC] Tentativa {tentativa}/{MAX_TENTATIVAS_SYNC} falhou: {e}. '
+                                      f'Aguardando {espera}s antes de tentar novamente.')
+                                time.sleep(espera)
+                            else:
+                                print(f'[SYNC] Todas as {MAX_TENTATIVAS_SYNC} tentativas falharam. Último erro: {e}')
+                    if ultimo_erro is not None:
+                        registrar_sync_event_pedidos(0, 'erro', str(ultimo_erro)[:180])
+                        registrar_sync_event_pedidos_energy(0, 'erro', str(ultimo_erro)[:180])
+                        registrar_sync_event_estoque(0, 'erro', str(ultimo_erro)[:180])
+                        registrar_sync_event_historico(0, 'erro', str(ultimo_erro)[:180])
+                finally:
+                    sync_lock.release()
         else:
-            MAX_TENTATIVAS_SYNC = 3
-            ultimo_erro = None
-            try:
-                for tentativa in range(1, MAX_TENTATIVAS_SYNC + 1):
-                    try:
-                        novos_pedidos        = sincronizar_pedidos()
-                        novos_pedidos_energy = sincronizar_pedidos_energy()
-                        alterados_estoque    = sincronizar_estoque()
-                        novos_historico      = sincronizar_historico()
+            print(f'[SYNC] Fora do horário (08h-19h). Atual: {hora_atual}h. Pulando.')
 
-                        # Módulo Financeiro — paralelo (cada job tem sua própria
-                        # conexão pyodbc + conexão SQLite; financeiro.db está em
-                        # WAL, suporta leituras/escritas concorrentes).
-                        _fin_syncs = [
-                            ('NF Entrada',           sincronizar_nf_entrada),
-                            ('NF Saída',             sincronizar_nf_saida),
-                            ('Contas a Receber',     sincronizar_contas_receber),
-                            ('Contas a Pagar',       sincronizar_contas_pagar),
-                            ('Movimentos Bancários', sincronizar_mov_bancarios),
-                            ('Energy — Contas a Pagar', sincronizar_energy_contas_pagar),
-                        ]
-                        from concurrent.futures import ThreadPoolExecutor, as_completed
-                        with ThreadPoolExecutor(max_workers=3, thread_name_prefix='fin-sync') as ex:
-                            futs = {ex.submit(_fn_f): _nome_f for _nome_f, _fn_f in _fin_syncs}
-                            for fut in as_completed(futs):
-                                _nome_f = futs[fut]
-                                try:
-                                    _tot_f = fut.result()
-                                    print(f'[SYNC] Financeiro — {_nome_f}: {_tot_f} registro(s) processado(s).')
-                                except Exception as _e_f:
-                                    print(f'[SYNC] Financeiro — {_nome_f}: erro: {_e_f}')
-
-                        ultimo_sync_dt = agora_sp()
-                        if criar_backup_diario():
-                            print('[BACKUP] Backup diário criado com sucesso.')
-                        print(f'[SYNC] Pedidos sincronizados. {novos_pedidos} registro(s) novo(s).')
-                        print(f'[SYNC] Pedidos Energy sincronizados. {novos_pedidos_energy} registro(s) novo(s).')
-                        print(f'[SYNC] Estoque sincronizado. {alterados_estoque} registro(s) alterado(s).')
-                        print(f'[SYNC] Histórico sincronizado. {novos_historico} registro(s) novo(s).')
-                        ultimo_erro = None
-                        break
-                    except Exception as e:
-                        ultimo_erro = e
-                        if tentativa < MAX_TENTATIVAS_SYNC:
-                            espera = 60 * tentativa
-                            print(f'[SYNC] Tentativa {tentativa}/{MAX_TENTATIVAS_SYNC} falhou: {e}. '
-                                  f'Aguardando {espera}s antes de tentar novamente.')
-                            time.sleep(espera)
-                        else:
-                            print(f'[SYNC] Todas as {MAX_TENTATIVAS_SYNC} tentativas falharam. Último erro: {e}')
-                if ultimo_erro is not None:
-                    registrar_sync_event_pedidos(0, 'erro', str(ultimo_erro)[:180])
-                    registrar_sync_event_pedidos_energy(0, 'erro', str(ultimo_erro)[:180])
-                    registrar_sync_event_estoque(0, 'erro', str(ultimo_erro)[:180])
-                    registrar_sync_event_historico(0, 'erro', str(ultimo_erro)[:180])
-            finally:
-                sync_lock.release()
-    else:
-        print(f'[SYNC] Fora do horário (08h-19h). Atual: {hora_atual}h. Pulando.')
-
-    limpar_logs_antigos()
-    agendar_proximo_sync()
+        limpar_logs_antigos()
+    except Exception as e:
+        print(f'[SYNC] Erro inesperado na rotina de sync: {e}')
+    finally:
+        agendar_proximo_sync()
 
 
 @app.route('/favicon.ico')
@@ -1185,8 +1265,35 @@ def pagina_primeiro_acesso():
 @app.route('/relatorios')
 @login_requerido
 def pagina_relatorios():
+    usuario = usuario_atual()
+    motivo_sem_acesso = None
+
+    if not usuario['is_admin'] and not filtrar_modulos_usuario(usuario):
+        setor_id = usuario['setor_id'] if 'setor_id' in usuario.keys() else None
+        if setor_id:
+            perms_setor = obter_relatorios_permitidos_setor(setor_id)
+            setor = obter_setor_por_id(setor_id)
+            nome_setor = setor['nome'] if setor else 'seu setor'
+            if not perms_setor:
+                motivo_sem_acesso = (
+                    f'O setor <strong>{nome_setor}</strong> não tem relatórios '
+                    f'configurados. Peça ao administrador para configurar as '
+                    f'permissões do setor.'
+                )
+            else:
+                motivo_sem_acesso = (
+                    'Você não tem permissão para nenhum relatório. '
+                    'Entre em contato com o administrador.'
+                )
+        else:
+            motivo_sem_acesso = (
+                'Você não tem permissão para nenhum relatório. '
+                'Entre em contato com o administrador.'
+            )
+
     return render_template(
         'relatorios/home.html',
+        motivo_sem_acesso=motivo_sem_acesso,
         **contexto_auth('ProtheusData - Relatórios')
     )
 
@@ -1202,7 +1309,7 @@ def pagina_consulta():
 def pagina_relatorio_compras_pedidos():
     modulo, relatorio = obter_relatorio('compras', 'pedidos')
     usuario = usuario_atual()
-    pode_ver_query = bool(usuario and (usuario['is_admin'] or usuario['pode_ver_query']))
+    pode_ver_query = bool(usuario and usuario['is_admin'] and usuario['pode_ver_query'])
     return render_template(
         'relatorios/compras_pedidos.html',
         modulo_ativo=modulo,
@@ -1218,7 +1325,7 @@ def pagina_relatorio_compras_pedidos():
 def pagina_relatorio_energy_pedidos():
     modulo, relatorio = obter_relatorio('energy', 'pedidos')
     usuario = usuario_atual()
-    pode_ver_query = bool(usuario and (usuario['is_admin'] or usuario['pode_ver_query']))
+    pode_ver_query = bool(usuario and usuario['is_admin'] and usuario['pode_ver_query'])
     return render_template(
         'relatorios/energy_pedidos.html',
         modulo_ativo=modulo,
@@ -1234,7 +1341,7 @@ def pagina_relatorio_energy_pedidos():
 def pagina_relatorio_compras_historico():
     modulo, relatorio = obter_relatorio('compras', 'historico')
     usuario = usuario_atual()
-    pode_ver_query = bool(usuario and (usuario['is_admin'] or usuario['pode_ver_query']))
+    pode_ver_query = bool(usuario and usuario['is_admin'] and usuario['pode_ver_query'])
     return render_template(
         'relatorios/compras_historico.html',
         modulo_ativo=modulo,
@@ -1250,7 +1357,7 @@ def pagina_relatorio_compras_historico():
 def pagina_relatorio_estoque_saldos():
     modulo, relatorio = obter_relatorio('estoque', 'saldos')
     usuario = usuario_atual()
-    pode_ver_query = bool(usuario and (usuario['is_admin'] or usuario['pode_ver_query']))
+    pode_ver_query = bool(usuario and usuario['is_admin'] and usuario['pode_ver_query'])
     return render_template(
         'relatorios/estoque_saldos.html',
         modulo_ativo=modulo,
@@ -1434,11 +1541,10 @@ def api_criar_token():
         (uid, nome, token, agora())
     )
     novo_token_id = cursor.lastrowid
-    for chave in permissoes:
-        modulo_id, relatorio_id = chave.split('.', 1)
-        conn.execute(
+    if permissoes:
+        conn.executemany(
             'INSERT INTO api_token_permissoes (token_id, modulo_id, relatorio_id) VALUES (?,?,?)',
-            (novo_token_id, modulo_id, relatorio_id)
+            [(novo_token_id, *chave.split('.', 1)) for chave in permissoes]
         )
     conn.commit()
     conn.close()
@@ -1881,7 +1987,7 @@ def _auditar_odata_rejeitada(modulo_id, relatorio_id, motivo, usuario_id=None, u
         conn.execute(
             'INSERT INTO logs_acesso (usuario_id, usuario_nome, acao, ip, data_hora) '
             'VALUES (?, ?, ?, ?, ?)',
-            (usuario_id, usuario_nome, acao, request.remote_addr, agora())
+            (usuario_id, usuario_nome, acao, _obter_ip_real(), agora())
         )
         conn.commit()
         conn.close()
@@ -2574,8 +2680,13 @@ def api_gerente_listar_usuarios():
     else:
         usuarios = []
     perms = conn.execute(
-        'SELECT usuario_id, modulo_id, relatorio_id FROM usuario_permissoes_relatorio '
-        'WHERE COALESCE(permitido,1)=1'
+        '''SELECT usuario_id, modulo_id, relatorio_id
+           FROM usuario_permissoes_relatorio
+           WHERE COALESCE(permitido, 1) = 1
+             AND usuario_id IN (
+               SELECT id FROM usuarios WHERE setor_id=? AND COALESCE(is_admin,0)=0
+             )''',
+        (setor_id,)
     ).fetchall()
     conn.close()
 
@@ -2654,7 +2765,7 @@ def pagina_cadastro():
 
 @app.route('/api/login', methods=['POST'])
 def api_login():
-    ip = request.remote_addr
+    ip = _obter_ip_real()
 
     if verificar_bloqueio(ip):
         return jsonify({'erro': f'Muitas tentativas. Aguarde {BLOQUEIO_MINUTOS} minutos.'}), 429
@@ -2844,44 +2955,42 @@ def api_relatorio_estoque_info():
         }), 500
 
 
-@app.route('/api/relatorios/compras/pedidos/historico-sync', methods=['GET'])
-@acesso_relatorio_requerido('compras', 'pedidos')
-def api_historico_sync():
+def _historico_sync_response(historico_fn):
+    """Helper compartilhado para rotas de histórico de sync com paginação."""
     try:
+        limite = min(max(int(request.args.get('limit', 10)), 1), 50)
+        offset = max(int(request.args.get('offset', 0)), 0)
+    except (TypeError, ValueError):
+        limite, offset = 10, 0
+    try:
+        linhas = historico_fn(limit=limite + 1, offset=offset)
+        tem_mais = len(linhas) > limite
+        if tem_mais:
+            linhas = linhas[:limite]
         historico = []
-        for linha in historico_sync_pedidos():
+        for linha in linhas:
             executado_em = linha['executado_em']
             if executado_em:
                 executado_em = parse_db_datetime(executado_em).strftime('%d/%m/%Y %H:%M')
-
             historico.append({
                 'executado_em': executado_em or '--',
-                'registros_novos': linha['registros_novos']
+                'registros_novos': linha['registros_novos'],
             })
-
-        return jsonify({'historico': historico})
+        return jsonify({'historico': historico, 'tem_mais': tem_mais})
     except Exception:
         return jsonify({'erro': 'Falha ao carregar histórico de sincronização.'}), 500
+
+
+@app.route('/api/relatorios/compras/pedidos/historico-sync', methods=['GET'])
+@acesso_relatorio_requerido('compras', 'pedidos')
+def api_historico_sync():
+    return _historico_sync_response(historico_sync_pedidos)
 
 
 @app.route('/api/relatorios/estoque/saldos/historico-sync', methods=['GET'])
 @acesso_relatorio_requerido('estoque', 'saldos')
 def api_historico_sync_estoque():
-    try:
-        historico = []
-        for linha in historico_sync_estoque():
-            executado_em = linha['executado_em']
-            if executado_em:
-                executado_em = parse_db_datetime(executado_em).strftime('%d/%m/%Y %H:%M')
-
-            historico.append({
-                'executado_em': executado_em or '--',
-                'registros_novos': linha['registros_novos']
-            })
-
-        return jsonify({'historico': historico})
-    except Exception:
-        return jsonify({'erro': 'Falha ao carregar histórico de sincronização.'}), 500
+    return _historico_sync_response(historico_sync_estoque)
 
 
 @app.route('/api/relatorios/compras/pedidos/download', methods=['GET'])
@@ -2948,18 +3057,22 @@ def api_relatorio_sync():
     global ultimo_sync_dt
     if not sync_lock.acquire(blocking=False):
         return jsonify({'erro': 'Já existe uma sincronização em andamento.'}), 409
+    t0 = time.monotonic()
     try:
         novos = sincronizar_pedidos()
+        duracao = round(time.monotonic() - t0)
         ultimo_sync_dt = agora_sp()
         criar_backup_diario()
         limpar_logs_antigos()
         registrar_log('sync_manual', session.get('usuario_id'), session.get('usuario_nome'))
         return jsonify({
-            'mensagem': f'Sincronização concluída. {novos} registro(s) novo(s).'
+            'mensagem': f'Sincronização concluída. {novos} registro(s) novo(s).',
+            'registros_novos': novos,
+            'duracao_segundos': duracao,
         })
     except Exception as e:
         registrar_sync_event_pedidos(0, 'erro', str(e)[:180])
-        return jsonify({'erro': 'Falha ao sincronizar com o Protheus.'}), 500
+        return jsonify({'erro': _classificar_erro_sync(e)}), 500
     finally:
         sync_lock.release()
 
@@ -2970,18 +3083,22 @@ def api_relatorio_estoque_sync():
     global ultimo_sync_dt
     if not sync_lock.acquire(blocking=False):
         return jsonify({'erro': 'Já existe uma sincronização em andamento.'}), 409
+    t0 = time.monotonic()
     try:
         alterados = sincronizar_estoque()
+        duracao = round(time.monotonic() - t0)
         ultimo_sync_dt = agora_sp()
         criar_backup_diario()
         limpar_logs_antigos()
         registrar_log('sync_manual_estoque', session.get('usuario_id'), session.get('usuario_nome'))
         return jsonify({
-            'mensagem': f'Sincronização concluída. {alterados} registro(s) alterado(s).'
+            'mensagem': f'Sincronização concluída. {alterados} registro(s) alterado(s).',
+            'registros_novos': alterados,
+            'duracao_segundos': duracao,
         })
     except Exception as e:
         registrar_sync_event_estoque(0, 'erro', str(e)[:180])
-        return jsonify({'erro': 'Falha ao sincronizar com o Protheus.'}), 500
+        return jsonify({'erro': _classificar_erro_sync(e)}), 500
     finally:
         sync_lock.release()
 
@@ -3026,19 +3143,7 @@ def api_relatorio_energy_pedidos_info():
 @app.route('/api/relatorios/energy/pedidos/historico-sync', methods=['GET'])
 @acesso_relatorio_requerido('energy', 'pedidos')
 def api_historico_sync_energy_pedidos():
-    try:
-        historico = []
-        for linha in historico_sync_pedidos_energy():
-            executado_em = linha['executado_em']
-            if executado_em:
-                executado_em = parse_db_datetime(executado_em).strftime('%d/%m/%Y %H:%M')
-            historico.append({
-                'executado_em': executado_em or '--',
-                'registros_novos': linha['registros_novos']
-            })
-        return jsonify({'historico': historico})
-    except Exception:
-        return jsonify({'erro': 'Falha ao carregar histórico de sincronização.'}), 500
+    return _historico_sync_response(historico_sync_pedidos_energy)
 
 
 @app.route('/api/relatorios/energy/pedidos/download', methods=['GET'])
@@ -3077,18 +3182,22 @@ def api_relatorio_energy_pedidos_sync():
     global ultimo_sync_dt
     if not sync_lock.acquire(blocking=False):
         return jsonify({'erro': 'Já existe uma sincronização em andamento.'}), 409
+    t0 = time.monotonic()
     try:
         novos = sincronizar_pedidos_energy()
+        duracao = round(time.monotonic() - t0)
         ultimo_sync_dt = agora_sp()
         criar_backup_diario()
         limpar_logs_antigos()
         registrar_log('sync_manual_energy_pedidos', session.get('usuario_id'), session.get('usuario_nome'))
         return jsonify({
-            'mensagem': f'Sincronização concluída. {novos} registro(s) novo(s).'
+            'mensagem': f'Sincronização concluída. {novos} registro(s) novo(s).',
+            'registros_novos': novos,
+            'duracao_segundos': duracao,
         })
     except Exception as e:
         registrar_sync_event_pedidos_energy(0, 'erro', str(e)[:180])
-        return jsonify({'erro': 'Falha ao sincronizar com o Protheus.'}), 500
+        return jsonify({'erro': _classificar_erro_sync(e)}), 500
     finally:
         sync_lock.release()
 
@@ -3133,19 +3242,7 @@ def api_relatorio_historico_info():
 @app.route('/api/relatorios/compras/historico/historico-sync', methods=['GET'])
 @acesso_relatorio_requerido('compras', 'historico')
 def api_historico_sync_historico():
-    try:
-        historico = []
-        for linha in historico_sync_historico():
-            executado_em = linha['executado_em']
-            if executado_em:
-                executado_em = parse_db_datetime(executado_em).strftime('%d/%m/%Y %H:%M')
-            historico.append({
-                'executado_em': executado_em or '--',
-                'registros_novos': linha['registros_novos']
-            })
-        return jsonify({'historico': historico})
-    except Exception:
-        return jsonify({'erro': 'Falha ao carregar histórico de sincronização.'}), 500
+    return _historico_sync_response(historico_sync_historico)
 
 
 @app.route('/api/relatorios/compras/historico/download', methods=['GET'])
@@ -3184,18 +3281,22 @@ def api_relatorio_historico_sync():
     global ultimo_sync_dt
     if not sync_lock.acquire(blocking=False):
         return jsonify({'erro': 'Já existe uma sincronização em andamento.'}), 409
+    t0 = time.monotonic()
     try:
         novos = sincronizar_historico()
+        duracao = round(time.monotonic() - t0)
         ultimo_sync_dt = agora_sp()
         criar_backup_diario()
         limpar_logs_antigos()
         registrar_log('sync_manual_historico', session.get('usuario_id'), session.get('usuario_nome'))
         return jsonify({
-            'mensagem': f'Sincronização concluída. {novos} registro(s) novo(s).'
+            'mensagem': f'Sincronização concluída. {novos} registro(s) novo(s).',
+            'registros_novos': novos,
+            'duracao_segundos': duracao,
         })
     except Exception as e:
         registrar_sync_event_historico(0, 'erro', str(e)[:180])
-        return jsonify({'erro': 'Falha ao sincronizar com o Protheus.'}), 500
+        return jsonify({'erro': _classificar_erro_sync(e)}), 500
     finally:
         sync_lock.release()
 
@@ -3219,24 +3320,73 @@ def _financeiro_info_response(info_fn, proximo_sync_fn=None):
 
 
 def _financeiro_historico_response(historico_fn):
-    linhas = historico_fn(limit=10)
+    try:
+        limite = min(max(int(request.args.get('limit', 10)), 1), 50)
+        offset = max(int(request.args.get('offset', 0)), 0)
+    except (TypeError, ValueError):
+        limite, offset = 10, 0
+    linhas = historico_fn(limit=limite + 1, offset=offset)
+    tem_mais = len(linhas) > limite
+    if tem_mais:
+        linhas = linhas[:limite]
     return jsonify({
         'historico': [
-            {'executado_em': r['executado_em'], 'registros_novos': r['registros_novos']}
+            {
+                'executado_em':   r['executado_em'],
+                'registros_novos': r['registros_novos'],
+                'status':         r['status'] if 'status' in r.keys() else None,
+                'erro_resumo':    r['erro_resumo'] if 'erro_resumo' in r.keys() else None,
+            }
             for r in linhas
-        ]
+        ],
+        'tem_mais': tem_mais,
     })
+
+
+def _classificar_erro_sync(e: Exception) -> str:
+    """Traduz exceções técnicas de sync em mensagens acionáveis para o usuário.
+
+    Classifica pelo texto da exceção em três categorias principais:
+    - Timeout/rede  → orienta tentar novamente em minutos
+    - Permissão     → orienta contatar TI
+    - Indisponível  → orienta aguardar
+    - Genérico      → exibe tipo e trecho da mensagem para diagnóstico
+    """
+    msg = str(e).lower()
+
+    if any(t in msg for t in ('timeout', 'timed out', 'query timeout', 'login timeout')):
+        return 'O ERP não respondeu no tempo esperado. Tente novamente em alguns minutos.'
+
+    if any(t in msg for t in ('network', 'connection reset', 'connection refused',
+                               'broken pipe', 'unable to connect', 'communication link',
+                               'server has gone away', '08001', '08s01')):
+        return 'O ERP está temporariamente indisponível. Tente novamente mais tarde.'
+
+    if any(t in msg for t in ('permission', 'access denied', 'login failed',
+                               'cannot open database', '28000', '42000')):
+        return 'Sem permissão de acesso ao ERP. Contate o administrador de TI.'
+
+    # Erro não classificado — inclui tipo e trecho da mensagem para diagnóstico
+    tipo = type(e).__name__
+    trecho = str(e)[:100].strip()
+    return f'Falha ao sincronizar com o Protheus. ({tipo}: {trecho})'
 
 
 def _financeiro_sync_response(sincronizar_fn, nome):
     if not sync_lock.acquire(blocking=False):
         return jsonify({'erro': 'Sync já em progresso. Tente novamente em instantes.'}), 409
+    t0 = time.monotonic()
     try:
         novos = sincronizar_fn()
+        duracao = round(time.monotonic() - t0)
         registrar_log(f'sync_manual_{nome}', session.get('usuario_id'), session.get('usuario_nome'))
-        return jsonify({'mensagem': f'Sincronização concluída. {novos} registro(s) processado(s).'})
+        return jsonify({
+            'mensagem': f'Sincronização concluída. {novos} registro(s) processado(s).',
+            'registros_novos': novos,
+            'duracao_segundos': duracao,
+        })
     except Exception as e:
-        return jsonify({'erro': f'Falha ao sincronizar com o Protheus: {str(e)[:120]}'}), 500
+        return jsonify({'erro': _classificar_erro_sync(e)}), 500
     finally:
         sync_lock.release()
 
@@ -3303,10 +3453,11 @@ def _auditar_download_financeiro_seguro(relatorio, formato, total):
 @acesso_relatorio_requerido('financeiro', 'nf_entrada')
 def pagina_financeiro_nf_entrada():
     usuario = usuario_atual()
+    pode_ver_query = bool(usuario and usuario['is_admin'] and usuario['pode_ver_query'])
     return render_template(
         'relatorios/financeiro_nf_entrada.html',
-        query_preview=QUERY_NF_ENTRADA,
-        pode_ver_query=bool(usuario and (usuario['is_admin'] or usuario['pode_ver_query'])),
+        query_preview=QUERY_NF_ENTRADA if pode_ver_query else '',
+        pode_ver_query=pode_ver_query,
         **contexto_auth('ProtheusData - NF Entrada'),
     )
 
@@ -3341,10 +3492,11 @@ def api_financeiro_nf_entrada_download():
 @acesso_relatorio_requerido('financeiro', 'nf_saida')
 def pagina_financeiro_nf_saida():
     usuario = usuario_atual()
+    pode_ver_query = bool(usuario and usuario['is_admin'] and usuario['pode_ver_query'])
     return render_template(
         'relatorios/financeiro_nf_saida.html',
-        query_preview=QUERY_NF_SAIDA,
-        pode_ver_query=bool(usuario and (usuario['is_admin'] or usuario['pode_ver_query'])),
+        query_preview=QUERY_NF_SAIDA if pode_ver_query else '',
+        pode_ver_query=pode_ver_query,
         **contexto_auth('ProtheusData - NF Saída'),
     )
 
@@ -3379,10 +3531,11 @@ def api_financeiro_nf_saida_download():
 @acesso_relatorio_requerido('financeiro', 'contas_receber')
 def pagina_financeiro_contas_receber():
     usuario = usuario_atual()
+    pode_ver_query = bool(usuario and usuario['is_admin'] and usuario['pode_ver_query'])
     return render_template(
         'relatorios/financeiro_contas_receber.html',
-        query_preview=QUERY_CONTAS_RECEBER,
-        pode_ver_query=bool(usuario and (usuario['is_admin'] or usuario['pode_ver_query'])),
+        query_preview=QUERY_CONTAS_RECEBER if pode_ver_query else '',
+        pode_ver_query=pode_ver_query,
         **contexto_auth('ProtheusData - Contas a Receber'),
     )
 
@@ -3417,10 +3570,11 @@ def api_financeiro_contas_receber_download():
 @acesso_relatorio_requerido('financeiro', 'contas_pagar')
 def pagina_financeiro_contas_pagar():
     usuario = usuario_atual()
+    pode_ver_query = bool(usuario and usuario['is_admin'] and usuario['pode_ver_query'])
     return render_template(
         'relatorios/financeiro_contas_pagar.html',
-        query_preview=QUERY_CONTAS_PAGAR,
-        pode_ver_query=bool(usuario and (usuario['is_admin'] or usuario['pode_ver_query'])),
+        query_preview=QUERY_CONTAS_PAGAR if pode_ver_query else '',
+        pode_ver_query=pode_ver_query,
         **contexto_auth('ProtheusData - Contas a Pagar'),
     )
 
@@ -3455,10 +3609,11 @@ def api_financeiro_contas_pagar_download():
 @acesso_relatorio_requerido('financeiro', 'mov_bancarios')
 def pagina_financeiro_mov_bancarios():
     usuario = usuario_atual()
+    pode_ver_query = bool(usuario and usuario['is_admin'] and usuario['pode_ver_query'])
     return render_template(
         'relatorios/financeiro_mov_bancarios.html',
-        query_preview=QUERY_MOV_BANCARIOS,
-        pode_ver_query=bool(usuario and (usuario['is_admin'] or usuario['pode_ver_query'])),
+        query_preview=QUERY_MOV_BANCARIOS if pode_ver_query else '',
+        pode_ver_query=pode_ver_query,
         **contexto_auth('ProtheusData - Movimentos Bancários'),
     )
 
@@ -3494,10 +3649,11 @@ def api_financeiro_mov_bancarios_download():
 @acesso_relatorio_requerido('energy', 'contas_pagar')
 def pagina_energy_contas_pagar():
     usuario = usuario_atual()
+    pode_ver_query = bool(usuario and usuario['is_admin'] and usuario['pode_ver_query'])
     return render_template(
         'relatorios/energy_contas_pagar.html',
-        query_preview=QUERY_ENERGY_CONTAS_PAGAR,
-        pode_ver_query=bool(usuario and (usuario['is_admin'] or usuario['pode_ver_query'])),
+        query_preview=QUERY_ENERGY_CONTAS_PAGAR if pode_ver_query else '',
+        pode_ver_query=pode_ver_query,
         **contexto_auth('ProtheusData - Energy Contas a Pagar'),
     )
 
@@ -3529,14 +3685,15 @@ def api_energy_contas_pagar_download():
 
 
 def _iso_para_protheus(data_iso):
-    """Converte '2024-01-15' (HTML date input) para '20240115' (formato Protheus no banco).
-    Retorna None se a data for vazia ou inválida."""
+    """Converte '2024-01-15' (HTML date input) para '20240115' (formato Protheus/SQLite).
+    Valida formato E calendário (ex: 2024-13-45 → None). Retorna None se inválida."""
     if not data_iso:
         return None
-    partes = data_iso.strip().split('-')
-    if len(partes) == 3:
-        return ''.join(partes)
-    return None
+    from datetime import datetime
+    try:
+        return datetime.strptime(data_iso.strip(), '%Y-%m-%d').strftime('%Y%m%d')
+    except ValueError:
+        return None
 
 
 def registrar_download(formato, registros):
@@ -3577,7 +3734,7 @@ def registrar_download_financeiro(relatorio, formato, registros):
         relatorio,
         formato,
         registros,
-        request.remote_addr if request else None,
+        _obter_ip_real() if request else None,
         agora(),
     )
     conn = conectar_financeiro()
@@ -3931,6 +4088,15 @@ def api_health():
     except Exception:
         status['ultimo_sync'] = 'Erro'
         status['ultimo_sync_estoque'] = 'Erro'
+
+    # Scheduler vivo apenas no worker SCHEDULER_OWNER
+    if sync_timer is not None:
+        status['scheduler'] = 'ativo' if sync_timer.is_alive() else 'morto'
+    else:
+        status['scheduler'] = 'ausente'
+
+    if status['scheduler'] == 'morto':
+        status['status'] = 'degradado'
 
     return jsonify(status)
 

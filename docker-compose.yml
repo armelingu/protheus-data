@@ -9,6 +9,11 @@ services:
     environment:
       TZ: America/Sao_Paulo
       APP_TIMEZONE: America/Sao_Paulo
+      # Timeouts de conexão ao Protheus — ver .env.example para explicação completa.
+      TRUST_PROXY_HEADERS: "false"
+      PROTHEUS_CONNECT_TIMEOUT: "30"
+      PROTHEUS_QUERY_TIMEOUT: "60"
+      PROTHEUS_MAX_RETRIES: "2"
       # Janela de resync por módulo — ver .env.example para explicação completa.
       SYNC_LOOKBACK_PEDIDOS: "60"
       SYNC_LOOKBACK_HISTORICO: "30"
