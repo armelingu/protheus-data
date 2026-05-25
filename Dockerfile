@@ -30,4 +30,4 @@ EXPOSE 5000
 HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=5 \
     CMD curl -fsS http://localhost:5000/health || exit 1
 
-CMD ["gunicorn", "-c", "gunicorn_conf.py", "app:app"]
+CMD ["gunicorn", "-c", "config/gunicorn_conf.py", "app:app"]
