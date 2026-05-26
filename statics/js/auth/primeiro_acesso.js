@@ -12,9 +12,14 @@ document.getElementById('primeiro-acesso-form').addEventListener('submit', funct
     erro.textContent = '';
     botao.disabled = true;
 
+    var csrfToken = (document.querySelector('meta[name="csrf-token"]') || {}).content || '';
+
     fetch('/api/primeiro-acesso', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': csrfToken
+        },
         body: JSON.stringify(payload)
     })
         .then(function(resp) {

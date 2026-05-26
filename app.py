@@ -1258,7 +1258,8 @@ def pagina_primeiro_acesso():
     return render_template(
         'auth/primeiro_acesso.html',
         usuario_atual=usuario_para_contexto(usuario),
-        page_title='ProtheusData - Atualizar senha'
+        page_title='ProtheusData - Atualizar senha',
+        csrf_token=session.get('csrf_token', '')
     )
 
 
