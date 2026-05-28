@@ -3,7 +3,7 @@ Pedidos de Compra — escopo Energy.
 
 Fork dirigido de services/relatorios/compras/pedidos.py: mesma query e
 mesmo esquema do relatório do módulo Compras, mudando apenas:
-- a lista de usuários do filtro (USUARIOS_ENERGY)
+- o filtro de escopo: C7_ITEMCTA = 05.001 (item contábil Energy)
 - a tabela local (pedidos_energy + pedidos_energy_sync_log)
 - o nome do arquivo de download (pedidos_energy.{csv|xlsx})
 
@@ -38,8 +38,8 @@ def _lookback_pedidos():
 
 SYNC_LOOKBACK_DAYS = _lookback_pedidos()
 
-# Compradores do setor Energy (acordado com a área).
-USUARIOS_ENERGY = "('000420', '000466', '000486')"
+# Item contábil do setor Energy — filtro por C7_ITEMCTA (substitui filtro por usuário).
+ITEM_CONTABIL_ENERGY = '05.001'
 
 TABELA   = 'pedidos_energy'
 SYNC_LOG = 'pedidos_energy_sync_log'
@@ -106,7 +106,7 @@ LEFT JOIN SAK010 APRUSR
     ON APRUSR.AK_COD = APR.CR_APROV
     AND APRUSR.D_E_L_E_T_ = ''
 WHERE SC7.D_E_L_E_T_ = ''
-    AND SC7.C7_USER IN {USUARIOS_ENERGY}
+    AND SC7.C7_ITEMCTA = '{ITEM_CONTABIL_ENERGY}'
 """
 
 QUERY_NOVOS    = QUERY_PEDIDOS + "    AND SC7.C7_EMISSAO >= ?\nORDER BY SC7.C7_EMISSAO DESC"
