@@ -39,7 +39,7 @@ def _lookback_pedidos():
 SYNC_LOOKBACK_DAYS = _lookback_pedidos()
 
 # Compradores do setor Energy.
-USUARIOS_ENERGY = "('000420', '000466', '000486', '000482', '000390', '000324', '000477')"
+USUARIOS_ENERGY = "('000420', '000466', '000486', '000482', '000390', '000324', '000477', '000470')"
 
 # Item contábil do setor Energy — apenas pedidos desses usuários com este item contábil.
 ITEM_CONTABIL_ENERGY = '05.001'
