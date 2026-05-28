@@ -38,7 +38,10 @@ def _lookback_pedidos():
 
 SYNC_LOOKBACK_DAYS = _lookback_pedidos()
 
-# Item contábil do setor Energy — filtro por C7_ITEMCTA (substitui filtro por usuário).
+# Compradores do setor Energy.
+USUARIOS_ENERGY = "('000420', '000466', '000486', '000482', '000390', '000324', '000477')"
+
+# Item contábil do setor Energy — apenas pedidos desses usuários com este item contábil.
 ITEM_CONTABIL_ENERGY = '05.001'
 
 TABELA   = 'pedidos_energy'
@@ -106,6 +109,7 @@ LEFT JOIN SAK010 APRUSR
     ON APRUSR.AK_COD = APR.CR_APROV
     AND APRUSR.D_E_L_E_T_ = ''
 WHERE SC7.D_E_L_E_T_ = ''
+    AND SC7.C7_USER IN {USUARIOS_ENERGY}
     AND SC7.C7_ITEMCTA = '{ITEM_CONTABIL_ENERGY}'
 """
 
