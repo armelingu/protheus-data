@@ -20,6 +20,14 @@ RELATORIOS_CATALOGO = [
                 'api_base': '/api/relatorios/compras/historico',
                 'ativo': True,
             },
+            {
+                'id': 'pendencia_aprovacao',
+                'titulo': 'Pendências de Aprovação',
+                'descricao': 'Pedidos de compra com aprovação pendente, filtrável por aprovador e período.',
+                'path': '/relatorios/compras/pendencia-aprovacao',
+                'api_base': '/api/relatorios/compras/pendencia-aprovacao',
+                'ativo': True,
+            },
         ],
     },
     {

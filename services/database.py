@@ -638,6 +638,45 @@ def criar_tabelas():
     conn.execute(
         'CREATE INDEX IF NOT EXISTS idx_historico_downloads_log_data_hora ON historico_downloads_log(data_hora)'
     )
+    # ── Pendências de Aprovação de Pedidos de Compra ──────────────────────────
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS pendencia_aprovacao (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            usuario TEXT,
+            filial TEXT,
+            pedido_compra TEXT,
+            valor_total TEXT,
+            data_emissao TEXT,
+            cod_fornecedor TEXT,
+            fornecedor TEXT,
+            nivel_aprovacao TEXT NOT NULL DEFAULT '',
+            aprovador TEXT,
+            data_aprovacao TEXT,
+            status_aprovacao TEXT,
+            UNIQUE(filial, pedido_compra, nivel_aprovacao)
+        )
+    ''')
+    conn.execute(
+        'CREATE INDEX IF NOT EXISTS idx_pendencia_aprovacao_emissao ON pendencia_aprovacao(data_emissao)'
+    )
+    conn.execute(
+        'CREATE INDEX IF NOT EXISTS idx_pendencia_aprovacao_aprovador ON pendencia_aprovacao(aprovador)'
+    )
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS pendencia_aprovacao_sync_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            executado_em TEXT,
+            registros_novos INTEGER DEFAULT 0,
+            status TEXT,
+            erro_resumo TEXT,
+            total_protheus INTEGER,
+            total_local INTEGER
+        )
+    ''')
+    conn.execute(
+        'CREATE INDEX IF NOT EXISTS idx_pendencia_aprovacao_sync_log_executado_em '
+        'ON pendencia_aprovacao_sync_log(executado_em)'
+    )
     conn.commit()
     conn.close()
     criar_tabelas_financeiro()

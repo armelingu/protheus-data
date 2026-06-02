@@ -52,6 +52,16 @@ from services.relatorios.compras.historico_pedidos import (
     carga_inicial_historico,
     registrar_sync_event_historico,
 )
+from services.relatorios.compras.pendencia_aprovacao import (
+    QUERY_BASE as QUERY_PENDENCIA_APROVACAO,
+    gerar_csv as gerar_csv_pendencia_aprovacao,
+    gerar_excel as gerar_excel_pendencia_aprovacao,
+    info_relatorio as info_relatorio_pendencia_aprovacao,
+    historico_sync as historico_sync_pendencia_aprovacao,
+    sincronizar as sincronizar_pendencia_aprovacao,
+    carga_inicial as carga_inicial_pendencia_aprovacao,
+    listar_aprovadores as listar_aprovadores_pendencia,
+)
 from services.relatorios.estoque.saldos import (
     QUERY_ESTOQUE,
     consolidar_sync_log as consolidar_sync_log_estoque,
@@ -1166,6 +1176,7 @@ def rotina_sync():
                             novos_pedidos_energy = sincronizar_pedidos_energy()
                             alterados_estoque    = sincronizar_estoque()
                             novos_historico      = sincronizar_historico()
+                            novos_pendencia      = sincronizar_pendencia_aprovacao()
 
                             # Módulo Financeiro — paralelo (cada job tem sua própria
                             # conexão pyodbc + conexão SQLite; financeiro.db está em
@@ -1350,6 +1361,22 @@ def pagina_relatorio_compras_historico():
         query_preview=QUERY_HISTORICO_PEDIDOS if pode_ver_query else '',
         pode_ver_query=pode_ver_query,
         **contexto_auth('ProtheusData - Histórico de Pedidos')
+    )
+
+
+@app.route('/relatorios/compras/pendencia-aprovacao')
+@acesso_relatorio_requerido('compras', 'pendencia_aprovacao')
+def pagina_relatorio_pendencia_aprovacao():
+    modulo, relatorio = obter_relatorio('compras', 'pendencia_aprovacao')
+    usuario = usuario_atual()
+    pode_ver_query = bool(usuario and usuario['is_admin'] and usuario['pode_ver_query'])
+    return render_template(
+        'relatorios/compras_pendencia_aprovacao.html',
+        modulo_ativo=modulo,
+        relatorio_ativo=relatorio,
+        query_preview=QUERY_PENDENCIA_APROVACAO if pode_ver_query else '',
+        pode_ver_query=pode_ver_query,
+        **contexto_auth('ProtheusData - Pendências de Aprovação')
     )
 
 
@@ -3302,6 +3329,119 @@ def api_relatorio_historico_sync():
         sync_lock.release()
 
 
+# ── Pendências de Aprovação ───────────────────────────────────────────────────
+
+@app.route('/api/relatorios/compras/pendencia-aprovacao/info', methods=['GET'])
+@acesso_relatorio_requerido('compras', 'pendencia_aprovacao')
+def api_pendencia_aprovacao_info():
+    try:
+        total, ultimo_sync, status, erro = info_relatorio_pendencia_aprovacao()
+        if ultimo_sync:
+            ultimo_sync = parse_db_datetime(ultimo_sync).strftime('%d/%m/%Y %H:%M')
+        else:
+            ultimo_sync = 'Nunca'
+        labels = {
+            'sucesso':   'Novos registros',
+            'sem_novos': 'Sem novidades',
+            'erro':      'Falha no sync',
+            'nunca':     'Nunca executado',
+        }
+        return jsonify({
+            'total_registros':          total,
+            'ultima_atualizacao':       ultimo_sync,
+            'proximo_sync':             calcular_proximo_sync(),
+            'ultimo_sync_status':       status,
+            'ultimo_sync_status_label': labels.get(status, 'Desconhecido'),
+            'ultimo_sync_erro':         erro,
+        })
+    except Exception:
+        return jsonify({
+            'total_registros':          'Erro',
+            'ultima_atualizacao':       'Falha ao consultar',
+            'proximo_sync':             '--',
+            'ultimo_sync_status':       'erro',
+            'ultimo_sync_status_label': 'Falha ao consultar',
+            'ultimo_sync_erro':         None,
+        }), 500
+
+
+@app.route('/api/relatorios/compras/pendencia-aprovacao/aprovadores', methods=['GET'])
+@acesso_relatorio_requerido('compras', 'pendencia_aprovacao')
+def api_pendencia_aprovacao_aprovadores():
+    try:
+        aprovadores = listar_aprovadores_pendencia()
+        return jsonify({'aprovadores': aprovadores})
+    except Exception:
+        return jsonify({'erro': 'Falha ao carregar lista de aprovadores.'}), 500
+
+
+@app.route('/api/relatorios/compras/pendencia-aprovacao/historico-sync', methods=['GET'])
+@acesso_relatorio_requerido('compras', 'pendencia_aprovacao')
+def api_pendencia_aprovacao_historico_sync():
+    return _historico_sync_response(historico_sync_pendencia_aprovacao)
+
+
+@app.route('/api/relatorios/compras/pendencia-aprovacao/sync', methods=['POST'])
+@acesso_relatorio_requerido('compras', 'pendencia_aprovacao')
+def api_pendencia_aprovacao_sync():
+    global ultimo_sync_dt
+    if not sync_lock.acquire(blocking=False):
+        return jsonify({'erro': 'Já existe uma sincronização em andamento.'}), 409
+    t0 = time.monotonic()
+    try:
+        novos = sincronizar_pendencia_aprovacao()
+        duracao = round(time.monotonic() - t0)
+        ultimo_sync_dt = agora_sp()
+        criar_backup_diario()
+        limpar_logs_antigos()
+        registrar_log('sync_manual_pendencia_aprovacao',
+                      session.get('usuario_id'), session.get('usuario_nome'))
+        return jsonify({
+            'mensagem': f'Sincronização concluída. {novos} registro(s) novo(s).',
+            'registros_novos': novos,
+            'duracao_segundos': duracao,
+        })
+    except Exception as e:
+        from services.relatorios.compras.pendencia_aprovacao import _registrar_sync
+        _registrar_sync(0, 'erro', str(e)[:180])
+        return jsonify({'erro': _classificar_erro_sync(e)}), 500
+    finally:
+        sync_lock.release()
+
+
+@app.route('/api/relatorios/compras/pendencia-aprovacao/download', methods=['GET'])
+@acesso_relatorio_requerido('compras', 'pendencia_aprovacao')
+def api_pendencia_aprovacao_download():
+    formato    = request.args.get('formato', 'excel')
+    data_inicio = request.args.get('data_inicio')
+    data_fim    = request.args.get('data_fim')
+    aprovador   = request.args.get('aprovador') or None
+
+    # Converte datas de YYYY-MM-DD para YYYYMMDD (padrão Protheus no SQLite)
+    if data_inicio:
+        data_inicio = data_inicio.replace('-', '')
+    if data_fim:
+        data_fim = data_fim.replace('-', '')
+
+    try:
+        if formato == 'excel':
+            conteudo, total = gerar_excel_pendencia_aprovacao(data_inicio, data_fim, aprovador)
+            return Response(
+                conteudo,
+                mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                headers={'Content-Disposition': 'attachment; filename=pendencia_aprovacao.xlsx'}
+            )
+        else:
+            conteudo, total = gerar_csv_pendencia_aprovacao(data_inicio, data_fim, aprovador)
+            return Response(
+                conteudo,
+                mimetype='text/csv; charset=utf-8',
+                headers={'Content-Disposition': 'attachment; filename=pendencia_aprovacao.csv'}
+            )
+    except Exception:
+        return jsonify({'erro': 'Falha ao gerar relatório.'}), 500
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # MÓDULO FINANCEIRO — 5 relatórios (NF Entrada, NF Saída, CR, CP, MB)
 # ══════════════════════════════════════════════════════════════════════════════
@@ -4128,9 +4268,10 @@ def inicializar():
     limpar_logs_antigos()
     print('[STARTUP] Verificando carga inicial...')
     try:
-        total_pedidos = carga_inicial_pedidos()
-        total_estoque   = carga_inicial_estoque()
-        total_historico = carga_inicial_historico()
+        total_pedidos    = carga_inicial_pedidos()
+        total_estoque    = carga_inicial_estoque()
+        total_historico  = carga_inicial_historico()
+        total_pendencia  = carga_inicial_pendencia_aprovacao()
         if total_pedidos > 0:
             print(f'[STARTUP] Carga inicial de pedidos concluída. {total_pedidos} registros importados.')
         else:
@@ -4145,6 +4286,11 @@ def inicializar():
             print(f'[STARTUP] Carga inicial do histórico concluída. {total_historico} registros importados.')
         else:
             print('[STARTUP] Dados do histórico de pedidos já existem no banco local.')
+
+        if total_pendencia > 0:
+            print(f'[STARTUP] Carga inicial de pendências de aprovação concluída. {total_pendencia} registros importados.')
+        else:
+            print('[STARTUP] Dados de pendências de aprovação já existem no banco local.')
 
         # ── Módulo Financeiro ─────────────────────────────────────────────────
         _financeiro_cargas_iniciais = [
