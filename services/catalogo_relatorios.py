@@ -113,6 +113,14 @@ RELATORIOS_CATALOGO = [
                 'api_base': '/api/relatorios/energy/pedidos',
                 'ativo': True,
             },
+            {
+                'id': 'pedidos_conta_05001',
+                'titulo': 'Pedidos — Conta 05.001',
+                'descricao': 'Todos os pedidos de compra com item contábil 05.001, independente do comprador.',
+                'path': '/relatorios/energy/pedidos-conta-05001',
+                'api_base': '/api/relatorios/energy/pedidos-conta-05001',
+                'ativo': True,
+            },
         ],
     },
 ]

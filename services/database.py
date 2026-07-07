@@ -539,6 +539,57 @@ def criar_tabelas():
         'CREATE INDEX IF NOT EXISTS idx_pedidos_energy_sync_log_executado_em '
         'ON pedidos_energy_sync_log(executado_em)'
     )
+    # ── Pedidos de Compra — Conta Contábil 05.001 (Energy, todos os compradores) ─
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS pedidos_conta_05001 (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            usuario TEXT,
+            filial TEXT,
+            pedido_compra TEXT,
+            item TEXT,
+            produto TEXT,
+            unidade TEXT,
+            descricao_produto TEXT,
+            quantidade TEXT,
+            preco_unitario TEXT,
+            preco_total TEXT,
+            data_entrega TEXT,
+            numero_sc TEXT,
+            item_sc TEXT,
+            observacoes TEXT,
+            classe_valor TEXT,
+            qtd_entregue TEXT,
+            num_cotacao TEXT,
+            moeda TEXT,
+            cod_fornecedor TEXT,
+            fornecedor TEXT,
+            deposito_estoque TEXT,
+            data_emissao TEXT,
+            aprovador TEXT,
+            data_aprovacao TEXT,
+            status_aprovacao TEXT,
+            UNIQUE(filial, pedido_compra, item)
+        )
+    ''')
+    conn.execute(
+        'CREATE INDEX IF NOT EXISTS idx_pedidos_conta_05001_emissao '
+        'ON pedidos_conta_05001(data_emissao)'
+    )
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS pedidos_conta_05001_sync_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            executado_em TEXT,
+            registros_novos INTEGER DEFAULT 0,
+            status TEXT,
+            erro_resumo TEXT,
+            total_protheus INTEGER,
+            total_local INTEGER
+        )
+    ''')
+    conn.execute(
+        'CREATE INDEX IF NOT EXISTS idx_pedidos_conta_05001_sync_log_executado_em '
+        'ON pedidos_conta_05001_sync_log(executado_em)'
+    )
     conn.execute('''
         CREATE TABLE IF NOT EXISTS downloads_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

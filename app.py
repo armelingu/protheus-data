@@ -42,6 +42,16 @@ from services.relatorios.energy.pedidos import (
     carga_inicial as carga_inicial_pedidos_energy,
     registrar_sync_event as registrar_sync_event_pedidos_energy,
 )
+from services.relatorios.energy.pedidos_conta_05001 import (
+    QUERY_BASE as QUERY_PEDIDOS_CONTA_05001,
+    gerar_csv as gerar_csv_pedidos_conta_05001,
+    gerar_excel as gerar_excel_pedidos_conta_05001,
+    info_relatorio as info_relatorio_pedidos_conta_05001,
+    historico_sync as historico_sync_pedidos_conta_05001,
+    sincronizar as sincronizar_pedidos_conta_05001,
+    carga_inicial as carga_inicial_pedidos_conta_05001,
+    registrar_sync_event as registrar_sync_event_pedidos_conta_05001,
+)
 from services.relatorios.compras.historico_pedidos import (
     QUERY_HISTORICO_BASE as QUERY_HISTORICO_PEDIDOS,
     gerar_csv_historico,
@@ -259,7 +269,8 @@ ultimo_sync_dt = None
 sync_timer = None
 sync_lock = threading.Lock()
 QUERY_PREVIEW_PEDIDOS        = QUERY_PEDIDOS.strip() + '\nORDER BY SC7.C7_EMISSAO DESC'
-QUERY_PREVIEW_PEDIDOS_ENERGY = QUERY_PEDIDOS_ENERGY.strip() + '\nORDER BY SC7.C7_EMISSAO DESC'
+QUERY_PREVIEW_PEDIDOS_ENERGY     = QUERY_PEDIDOS_ENERGY.strip() + '\nORDER BY SC7.C7_EMISSAO DESC'
+QUERY_PREVIEW_PEDIDOS_CONTA_05001 = QUERY_PEDIDOS_CONTA_05001.strip()
 QUERY_PREVIEW_ESTOQUE = QUERY_ESTOQUE.strip()
 
 
@@ -1172,11 +1183,12 @@ def rotina_sync():
                 try:
                     for tentativa in range(1, MAX_TENTATIVAS_SYNC + 1):
                         try:
-                            novos_pedidos        = sincronizar_pedidos()
-                            novos_pedidos_energy = sincronizar_pedidos_energy()
-                            alterados_estoque    = sincronizar_estoque()
-                            novos_historico      = sincronizar_historico()
-                            novos_pendencia      = sincronizar_pendencia_aprovacao()
+                            novos_pedidos             = sincronizar_pedidos()
+                            novos_pedidos_energy      = sincronizar_pedidos_energy()
+                            novos_pedidos_conta_05001 = sincronizar_pedidos_conta_05001()
+                            alterados_estoque         = sincronizar_estoque()
+                            novos_historico           = sincronizar_historico()
+                            novos_pendencia           = sincronizar_pendencia_aprovacao()
 
                             # Módulo Financeiro — paralelo (cada job tem sua própria
                             # conexão pyodbc + conexão SQLite; financeiro.db está em
@@ -1205,6 +1217,7 @@ def rotina_sync():
                                 print('[BACKUP] Backup diário criado com sucesso.')
                             print(f'[SYNC] Pedidos sincronizados. {novos_pedidos} registro(s) novo(s).')
                             print(f'[SYNC] Pedidos Energy sincronizados. {novos_pedidos_energy} registro(s) novo(s).')
+                            print(f'[SYNC] Pedidos Conta 05.001 sincronizados. {novos_pedidos_conta_05001} registro(s) novo(s).')
                             print(f'[SYNC] Estoque sincronizado. {alterados_estoque} registro(s) alterado(s).')
                             print(f'[SYNC] Histórico sincronizado. {novos_historico} registro(s) novo(s).')
                             ultimo_erro = None
@@ -1221,6 +1234,7 @@ def rotina_sync():
                     if ultimo_erro is not None:
                         registrar_sync_event_pedidos(0, 'erro', str(ultimo_erro)[:180])
                         registrar_sync_event_pedidos_energy(0, 'erro', str(ultimo_erro)[:180])
+                        registrar_sync_event_pedidos_conta_05001(0, 'erro', str(ultimo_erro)[:180])
                         registrar_sync_event_estoque(0, 'erro', str(ultimo_erro)[:180])
                         registrar_sync_event_historico(0, 'erro', str(ultimo_erro)[:180])
                 finally:
@@ -1345,6 +1359,22 @@ def pagina_relatorio_energy_pedidos():
         query_preview=QUERY_PREVIEW_PEDIDOS_ENERGY if pode_ver_query else '',
         pode_ver_query=pode_ver_query,
         **contexto_auth('ProtheusData - Pedidos Energy')
+    )
+
+
+@app.route('/relatorios/energy/pedidos-conta-05001')
+@acesso_relatorio_requerido('energy', 'pedidos_conta_05001')
+def pagina_relatorio_energy_pedidos_conta_05001():
+    modulo, relatorio = obter_relatorio('energy', 'pedidos_conta_05001')
+    usuario = usuario_atual()
+    pode_ver_query = bool(usuario and usuario['is_admin'] and usuario['pode_ver_query'])
+    return render_template(
+        'relatorios/energy_pedidos_conta_05001.html',
+        modulo_ativo=modulo,
+        relatorio_ativo=relatorio,
+        query_preview=QUERY_PREVIEW_PEDIDOS_CONTA_05001 if pode_ver_query else '',
+        pode_ver_query=pode_ver_query,
+        **contexto_auth('ProtheusData - Pedidos Conta 05.001')
     )
 
 
@@ -3230,6 +3260,103 @@ def api_relatorio_energy_pedidos_sync():
         sync_lock.release()
 
 
+@app.route('/api/relatorios/energy/pedidos-conta-05001/info', methods=['GET'])
+@acesso_relatorio_requerido('energy', 'pedidos_conta_05001')
+def api_relatorio_energy_pedidos_conta_05001_info():
+    try:
+        total, ultimo_sync, ultimo_sync_status, ultimo_sync_erro = info_relatorio_pedidos_conta_05001()
+        if ultimo_sync:
+            dt = parse_db_datetime(ultimo_sync)
+            ultimo_sync = dt.strftime('%d/%m/%Y %H:%M')
+        else:
+            ultimo_sync = 'Nunca'
+        labels = {
+            'sucesso': 'Novos registros',
+            'sem_novos': 'Sem novidades',
+            'erro': 'Falha no sync',
+            'nunca': 'Nunca executado',
+            'alerta': 'Divergência detectada',
+        }
+        return jsonify({
+            'total_registros': total,
+            'ultima_atualizacao': ultimo_sync,
+            'proximo_sync': calcular_proximo_sync(),
+            'ultimo_sync_status': ultimo_sync_status,
+            'ultimo_sync_status_label': labels.get(ultimo_sync_status, 'Desconhecido'),
+            'ultimo_sync_erro': ultimo_sync_erro,
+        })
+    except Exception:
+        return jsonify({
+            'total_registros': 'Erro',
+            'ultima_atualizacao': 'Falha ao consultar',
+            'proximo_sync': '--',
+            'ultimo_sync_status': 'erro',
+            'ultimo_sync_status_label': 'Falha ao consultar',
+            'ultimo_sync_erro': None,
+        }), 500
+
+
+@app.route('/api/relatorios/energy/pedidos-conta-05001/historico-sync', methods=['GET'])
+@acesso_relatorio_requerido('energy', 'pedidos_conta_05001')
+def api_historico_sync_energy_pedidos_conta_05001():
+    return _historico_sync_response(historico_sync_pedidos_conta_05001)
+
+
+@app.route('/api/relatorios/energy/pedidos-conta-05001/download', methods=['GET'])
+@acesso_relatorio_requerido('energy', 'pedidos_conta_05001')
+def api_relatorio_energy_pedidos_conta_05001_download():
+    formato    = request.args.get('formato', 'csv').lower()
+    data_inicio = _iso_para_protheus(request.args.get('data_inicio'))
+    data_fim    = _iso_para_protheus(request.args.get('data_fim'))
+    try:
+        if formato == 'excel':
+            dados, total = gerar_excel_pedidos_conta_05001(data_inicio=data_inicio, data_fim=data_fim)
+            registrar_log('download_energy_pedidos_conta_05001_excel', session.get('usuario_id'), session.get('usuario_nome'))
+            registrar_download(formato, total)
+            return Response(
+                dados,
+                mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                headers={'Content-Disposition': 'attachment; filename=pedidos_conta_05001.xlsx'}
+            )
+        else:
+            dados, total = gerar_csv_pedidos_conta_05001(data_inicio=data_inicio, data_fim=data_fim)
+            registrar_log('download_energy_pedidos_conta_05001_csv', session.get('usuario_id'), session.get('usuario_nome'))
+            registrar_download(formato, total)
+            return Response(
+                dados,
+                mimetype='text/csv',
+                headers={'Content-Disposition': 'attachment; filename=pedidos_conta_05001.csv'}
+            )
+    except Exception:
+        return jsonify({'erro': 'Falha ao gerar relatório.'}), 500
+
+
+@app.route('/api/relatorios/energy/pedidos-conta-05001/sync', methods=['POST'])
+@acesso_relatorio_requerido('energy', 'pedidos_conta_05001')
+def api_relatorio_energy_pedidos_conta_05001_sync():
+    global ultimo_sync_dt
+    if not sync_lock.acquire(blocking=False):
+        return jsonify({'erro': 'Já existe uma sincronização em andamento.'}), 409
+    t0 = time.monotonic()
+    try:
+        novos = sincronizar_pedidos_conta_05001()
+        duracao = round(time.monotonic() - t0)
+        ultimo_sync_dt = agora_sp()
+        criar_backup_diario()
+        limpar_logs_antigos()
+        registrar_log('sync_manual_energy_pedidos_conta_05001', session.get('usuario_id'), session.get('usuario_nome'))
+        return jsonify({
+            'mensagem': f'Sincronização concluída. {novos} registro(s) novo(s).',
+            'registros_novos': novos,
+            'duracao_segundos': duracao,
+        })
+    except Exception as e:
+        registrar_sync_event_pedidos_conta_05001(0, 'erro', str(e)[:180])
+        return jsonify({'erro': _classificar_erro_sync(e)}), 500
+    finally:
+        sync_lock.release()
+
+
 @app.route('/api/relatorios/compras/historico/info', methods=['GET'])
 @acesso_relatorio_requerido('compras', 'historico')
 def api_relatorio_historico_info():
@@ -4268,10 +4395,11 @@ def inicializar():
     limpar_logs_antigos()
     print('[STARTUP] Verificando carga inicial...')
     try:
-        total_pedidos    = carga_inicial_pedidos()
-        total_estoque    = carga_inicial_estoque()
-        total_historico  = carga_inicial_historico()
-        total_pendencia  = carga_inicial_pendencia_aprovacao()
+        total_pedidos         = carga_inicial_pedidos()
+        total_estoque         = carga_inicial_estoque()
+        total_historico       = carga_inicial_historico()
+        total_pendencia       = carga_inicial_pendencia_aprovacao()
+        total_conta_05001     = carga_inicial_pedidos_conta_05001()
         if total_pedidos > 0:
             print(f'[STARTUP] Carga inicial de pedidos concluída. {total_pedidos} registros importados.')
         else:
@@ -4291,6 +4419,11 @@ def inicializar():
             print(f'[STARTUP] Carga inicial de pendências de aprovação concluída. {total_pendencia} registros importados.')
         else:
             print('[STARTUP] Dados de pendências de aprovação já existem no banco local.')
+
+        if total_conta_05001 > 0:
+            print(f'[STARTUP] Carga inicial de pedidos conta 05.001 concluída. {total_conta_05001} registros importados.')
+        else:
+            print('[STARTUP] Dados de pedidos conta 05.001 já existem no banco local.')
 
         # ── Módulo Financeiro ─────────────────────────────────────────────────
         _financeiro_cargas_iniciais = [
