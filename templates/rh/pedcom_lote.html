@@ -1,0 +1,209 @@
+{% extends "base_auth.html" %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="/statics/css/relatorios/consulta.css">
+<link rel="stylesheet" href="/statics/css/rh/pedcom.css">
+{% endblock %}
+
+{% block page_content %}
+<section class="painel" style="max-width:1000px">
+
+    <header class="painel-topo">
+        <div class="painel-cabecalho">
+            <p class="painel-kicker">RH · Pedidos de Compra PJ</p>
+            <h1>Criação de Pedidos — Lote Semestral</h1>
+            <p class="subtitulo">
+                Importe a planilha do RH para criar os pedidos de compra PJ em massa no Protheus via webservice WSHBPEDC.
+                Um pedido é criado por colaborador — a operação pode levar alguns minutos.
+            </p>
+        </div>
+        <div class="painel-controles" style="flex-direction:row;align-items:center;gap:8px">
+            <a href="/rh/pedcom/historico" class="painel button btn-secundario" style="text-decoration:none;padding:8px 16px;font-size:12px;font-weight:600;border:1px solid #e2e2e2;color:#555;background:#fff">
+                Ver Histórico
+            </a>
+        </div>
+    </header>
+
+    <!-- ── Indicador de etapas ────────────────────────────────────────────── -->
+    <div class="pedcom-stepper">
+        <div class="pedcom-step ativo" id="step-1">
+            <span class="pedcom-step-num">1</span>
+            <span>Upload</span>
+        </div>
+        <div class="pedcom-step-sep"></div>
+        <div class="pedcom-step" id="step-2">
+            <span class="pedcom-step-num">2</span>
+            <span>Confirmar</span>
+        </div>
+        <div class="pedcom-step-sep"></div>
+        <div class="pedcom-step" id="step-3">
+            <span class="pedcom-step-num">3</span>
+            <span>Processando</span>
+        </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════════════════
+         ETAPA 1 — Upload
+    ═══════════════════════════════════════════════════════════════════════ -->
+    <div class="pedcom-stage ativa" id="stage-upload">
+
+        <div class="pedcom-dropzone" id="dropzone" tabindex="0" role="button" aria-label="Selecionar planilha .xlsx">
+            <div class="pedcom-dropzone-icon">↑</div>
+            <p class="pedcom-dropzone-titulo">Arraste a planilha aqui</p>
+            <p class="pedcom-dropzone-subtitulo">
+                Formato aceito: <strong>.xlsx</strong> — Layout_Pedido_Compra_PJ_v2<br>
+                Tamanho máximo: 5 MB
+            </p>
+            <div id="dropzone-arquivo" style="display:none" class="pedcom-dropzone-arquivo">
+                <span>Arquivo selecionado:</span>
+                <strong id="dropzone-nome"></strong>
+            </div>
+            <button type="button" class="pedcom-dropzone-btn" id="btn-selecionar">
+                Selecionar arquivo
+            </button>
+            <input type="file" id="input-arquivo" accept=".xlsx" style="display:none" aria-hidden="true">
+        </div>
+
+        <div id="upload-erros" class="pedcom-avisos" style="display:none;margin-top:16px"></div>
+
+        <div style="display:flex;justify-content:flex-end;margin-top:16px">
+            <button type="button" id="btn-importar" disabled>
+                Analisar Planilha
+            </button>
+        </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════════════════
+         ETAPA 2 — Preview e confirmação
+    ═══════════════════════════════════════════════════════════════════════ -->
+    <div class="pedcom-stage" id="stage-preview">
+
+        <div id="preview-avisos" class="pedcom-avisos" style="display:none"></div>
+
+        <!-- Resumo do lote -->
+        <div class="pedcom-resumo">
+            <div class="pedcom-resumo-item">
+                <span class="pedcom-resumo-label">Colaboradores</span>
+                <span class="pedcom-resumo-valor destaque" id="resumo-total">—</span>
+            </div>
+            <div class="pedcom-resumo-item">
+                <span class="pedcom-resumo-label">Centro de Custo</span>
+                <span class="pedcom-resumo-valor" id="resumo-codcc">—</span>
+            </div>
+            <div class="pedcom-resumo-item">
+                <span class="pedcom-resumo-label">Classe de Valor</span>
+                <span class="pedcom-resumo-valor" id="resumo-codclvl">—</span>
+            </div>
+        </div>
+
+        <!-- Tabela de preview -->
+        <div class="pedcom-preview-wrap">
+            <table class="pedcom-preview-table">
+                <thead>
+                    <tr>
+                        <th>Colaborador</th>
+                        <th>Fornecedor / Loja</th>
+                        <th>Cond. Pgto</th>
+                        <th>Produto</th>
+                        <th>Período</th>
+                        <th>Rateios</th>
+                    </tr>
+                </thead>
+                <tbody id="preview-tbody">
+                    <tr><td colspan="6" class="pedcom-vazio">Carregando...</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Ações -->
+        <div class="pedcom-acoes-confirmar">
+            <p class="pedcom-acoes-confirmar-info">
+                Ao confirmar, os pedidos serão criados <strong>diretamente no Protheus</strong>.<br>
+                Certifique-se de que os dados acima estão corretos antes de prosseguir.
+            </p>
+            <div class="pedcom-acoes-confirmar-btns">
+                <button type="button" id="btn-voltar-upload" class="btn-secundario">
+                    ← Voltar
+                </button>
+                <button type="button" id="btn-confirmar">
+                    Confirmar e Criar Pedidos
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════════════════════
+         ETAPA 3 — Processamento em tempo real
+    ═══════════════════════════════════════════════════════════════════════ -->
+    <div class="pedcom-stage" id="stage-processando">
+
+        <div id="status-lote-banner" class="pedcom-status-lote processando" style="display:none">
+            <span id="status-lote-texto"></span>
+        </div>
+
+        <!-- Contadores -->
+        <div class="pedcom-progresso-contadores">
+            <div class="pedcom-contador">
+                <span class="pedcom-contador-label">Total</span>
+                <span class="pedcom-contador-valor" id="cnt-total">—</span>
+            </div>
+            <div class="pedcom-contador is-sucesso">
+                <span class="pedcom-contador-label">Sucesso</span>
+                <span class="pedcom-contador-valor" id="cnt-sucesso">0</span>
+            </div>
+            <div class="pedcom-contador is-falha">
+                <span class="pedcom-contador-label">Falha</span>
+                <span class="pedcom-contador-valor" id="cnt-falha">0</span>
+            </div>
+            <div class="pedcom-contador is-pendente">
+                <span class="pedcom-contador-label">Pendente</span>
+                <span class="pedcom-contador-valor" id="cnt-pendente">—</span>
+            </div>
+        </div>
+
+        <!-- Barra de progresso -->
+        <div class="pedcom-progresso">
+            <div class="pedcom-barra-wrap">
+                <div class="pedcom-barra" id="barra-progresso"></div>
+            </div>
+            <p class="pedcom-barra-texto" id="barra-texto">Aguardando...</p>
+        </div>
+
+        <!-- Tabela de status por item -->
+        <div class="pedcom-itens-wrap">
+            <table class="pedcom-itens-table">
+                <thead>
+                    <tr>
+                        <th>Colaborador</th>
+                        <th>Fornecedor / Loja</th>
+                        <th>Status</th>
+                        <th>Pedido (C7_NUM)</th>
+                        <th>Observação</th>
+                    </tr>
+                </thead>
+                <tbody id="itens-tbody">
+                    <tr><td colspan="5" class="pedcom-loading">Aguardando início do processamento...</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="pedcom-acoes-pos">
+            <a href="/rh/pedcom" class="painel button btn-secundario" style="text-decoration:none;padding:8px 16px;font-size:12px;font-weight:600;border:1px solid #e2e2e2;color:#555;background:#fff">
+                Novo Lote
+            </a>
+            <a href="/rh/pedcom/historico" class="painel button btn-secundario" style="text-decoration:none;padding:8px 16px;font-size:12px;font-weight:600;border:1px solid #e2e2e2;color:#555;background:#fff">
+                Ver Histórico
+            </a>
+        </div>
+    </div>
+
+</section>
+
+<div class="toast-area" aria-live="polite" aria-atomic="true">
+    <div class="mensagem" id="mensagem"></div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/statics/js/rh/pedcom_lote.js"></script>
+{% endblock %}
