@@ -11,6 +11,7 @@ DATA_DIR = os.path.join(BASE_DIR, 'data')
 USERS_DB      = os.path.join(DATA_DIR, 'users.db')
 PEDIDOS_DB    = os.path.join(DATA_DIR, 'pedidos.db')
 FINANCEIRO_DB = os.path.join(DATA_DIR, 'financeiro.db')
+PEDCOM_DB     = os.path.join(DATA_DIR, 'pedcom.db')
 BACKUPS_DIR   = os.path.join(DATA_DIR, 'backups')
 
 
@@ -110,6 +111,10 @@ def conectar_pedidos():
 
 def conectar_financeiro():
     return _conectar(FINANCEIRO_DB, 'financeiro')
+
+
+def conectar_pedcom():
+    return _conectar(PEDCOM_DB, 'pedcom')
 
 
 def fechar_pool_thread():
@@ -997,6 +1002,72 @@ def criar_tabelas_financeiro():
     conn.commit()
     conn.close()
 
+    _criar_tabelas_pedcom()
+
+
+def _criar_tabelas_pedcom():
+    """Tabelas do módulo de criação de Pedidos de Compra PJ (WSHBPEDC).
+
+    pedcom_lotes  — um registro por lote importado (1 planilha = 1 lote)
+    pedcom_itens  — um registro por colaborador dentro do lote (1 item = 1 pedido WS)
+    """
+    conn = conectar_pedcom()
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS pedcom_lotes (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            criado_em       TEXT,
+            criado_por_id   INTEGER,
+            criado_por_nome TEXT,
+            nome_lote       TEXT,
+            codcc           TEXT,
+            codclvl         TEXT,
+            total           INTEGER DEFAULT 0,
+            pendente        INTEGER DEFAULT 0,
+            processando     INTEGER DEFAULT 0,
+            sucesso         INTEGER DEFAULT 0,
+            falha           INTEGER DEFAULT 0,
+            status          TEXT DEFAULT 'pendente',
+            iniciado_em     TEXT,
+            concluido_em    TEXT
+        )
+    ''')
+    conn.execute(
+        'CREATE INDEX IF NOT EXISTS idx_pedcom_lotes_status ON pedcom_lotes(status)'
+    )
+    conn.execute(
+        'CREATE INDEX IF NOT EXISTS idx_pedcom_lotes_criado_em ON pedcom_lotes(criado_em)'
+    )
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS pedcom_itens (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            lote_id          INTEGER NOT NULL REFERENCES pedcom_lotes(id),
+            nome_colaborador TEXT,
+            codfornecedor    TEXT NOT NULL,
+            lojafornec       TEXT NOT NULL,
+            codigocond       TEXT NOT NULL,
+            codcc            TEXT NOT NULL,
+            codclvl          TEXT NOT NULL,
+            codigoproduto    TEXT NOT NULL,
+            mesinicial       TEXT NOT NULL,
+            anoreferencia    TEXT NOT NULL,
+            qtdmeses         TEXT NOT NULL,
+            rateios_json     TEXT NOT NULL,
+            status           TEXT DEFAULT 'pendente',
+            numero_pedido    TEXT,
+            erro             TEXT,
+            iniciado_em      TEXT,
+            concluido_em     TEXT
+        )
+    ''')
+    conn.execute(
+        'CREATE INDEX IF NOT EXISTS idx_pedcom_itens_lote_id ON pedcom_itens(lote_id)'
+    )
+    conn.execute(
+        'CREATE INDEX IF NOT EXISTS idx_pedcom_itens_status ON pedcom_itens(status)'
+    )
+    conn.commit()
+    conn.close()
+
 
 def limpar_logs_antigos():
     """Retention diferenciada por tipo de log:
@@ -1106,6 +1177,7 @@ def criar_backup_diario():
     users_backup      = os.path.join(BACKUPS_DIR, f'users_{data_tag}.db')
     pedidos_backup    = os.path.join(BACKUPS_DIR, f'pedidos_{data_tag}.db')
     financeiro_backup = os.path.join(BACKUPS_DIR, f'financeiro_{data_tag}.db')
+    pedcom_backup     = os.path.join(BACKUPS_DIR, f'pedcom_{data_tag}.db')
 
     criou_backup = False
 
@@ -1119,6 +1191,10 @@ def criar_backup_diario():
 
     if os.path.exists(FINANCEIRO_DB) and not os.path.exists(financeiro_backup):
         _backup_sqlite(FINANCEIRO_DB, financeiro_backup)
+        criou_backup = True
+
+    if os.path.exists(PEDCOM_DB) and not os.path.exists(pedcom_backup):
+        _backup_sqlite(PEDCOM_DB, pedcom_backup)
         criou_backup = True
 
     limpar_backups_antigos()
