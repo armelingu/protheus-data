@@ -93,6 +93,22 @@ RELATORIOS_CATALOGO = [
         ],
     },
     {
+        'id': 'rh',
+        'titulo': 'RH',
+        'descricao': 'Operações do setor de Recursos Humanos: criação de pedidos de compra PJ.',
+        'relatorios': [
+            {
+                'id': 'pedcom',
+                'titulo': 'Pedidos de Compra PJ',
+                'descricao': 'Criação em massa de pedidos de compra para colaboradores PJ via planilha.',
+                'path': '/rh/pedcom',
+                'api_base': '/api/rh/pedcom',
+                'ativo': True,
+                'admin_only': False,
+            },
+        ],
+    },
+    {
         'id': 'energy',
         'titulo': 'Energy',
         'descricao': 'Relatórios do negócio Energy (E2_ITEMD = 05.001).',

@@ -121,6 +121,14 @@ from services.relatorios.financeiro.mov_bancarios import (
 )
 from services.email_service import montar_email_acesso, enviar_email
 from services.time_utils import APP_TIMEZONE, agora_sp, parse_db_datetime
+from services.pedcom.importacao import importar_xlsx as pedcom_importar_xlsx
+from services.pedcom.validacao import validar_item as pedcom_validar_item, validar_lote as pedcom_validar_lote
+from services.pedcom.lote import (
+    persistir_lote as pedcom_persistir_lote,
+    iniciar_lote_async as pedcom_iniciar_lote_async,
+    obter_status_lote as pedcom_obter_status_lote,
+    listar_lotes as pedcom_listar_lotes,
+)
 
 load_dotenv()
 
@@ -4459,6 +4467,206 @@ def inicializar():
 
     agendar_proximo_sync()
     print(f'[SYNC] Próximo sync agendado para {calcular_proximo_sync()}.')
+
+
+# ╔══════════════════════════════════════════════════════════════════════════════╗
+# ║  RH — Pedidos de Compra PJ (WSHBPEDC)                                       ║
+# ╚══════════════════════════════════════════════════════════════════════════════╝
+
+# ─── Páginas ─────────────────────────────────────────────────────────────────
+
+@app.route('/rh/pedcom')
+@acesso_relatorio_requerido('rh', 'pedcom')
+def pagina_rh_pedcom():
+    return render_template(
+        'rh/pedcom_lote.html',
+        **contexto_auth('ProtheusData — Pedidos de Compra PJ'),
+    )
+
+
+@app.route('/rh/pedcom/historico')
+@acesso_relatorio_requerido('rh', 'pedcom')
+def pagina_rh_pedcom_historico():
+    return render_template(
+        'rh/pedcom_historico.html',
+        **contexto_auth('ProtheusData — Histórico de Lotes PJ'),
+    )
+
+
+# ─── API: importar planilha (preview + validação) ─────────────────────────────
+
+@app.route('/api/rh/pedcom/importar', methods=['POST'])
+@acesso_relatorio_requerido('rh', 'pedcom')
+def api_rh_pedcom_importar():
+    """Recebe o .xlsx, executa parsing e devolve preview + erros de validação.
+
+    Não persiste nada — apenas valida e retorna os dados para confirmação.
+    """
+    if 'arquivo' not in request.files:
+        return jsonify({'erro': 'Nenhum arquivo enviado.'}), 400
+
+    arquivo = request.files['arquivo']
+    if not arquivo.filename:
+        return jsonify({'erro': 'Arquivo sem nome.'}), 400
+    if not arquivo.filename.lower().endswith('.xlsx'):
+        return jsonify({'erro': 'Apenas arquivos .xlsx são aceitos.'}), 400
+
+    conteudo = arquivo.read()
+    if len(conteudo) > 5 * 1024 * 1024:  # 5 MB
+        return jsonify({'erro': 'Arquivo muito grande (limite: 5 MB).'}), 400
+
+    resultado = pedcom_importar_xlsx(conteudo)
+
+    # Erros estruturais da planilha impedem o envio
+    if resultado['erros']:
+        return jsonify({
+            'ok': False,
+            'erros': resultado['erros'],
+            'avisos': resultado['avisos'],
+        }), 422
+
+    # Validação item a item
+    erros_itens = []
+    for i, item in enumerate(resultado['itens']):
+        erros = pedcom_validar_item(item)
+        if erros:
+            nome = item.get('nome_colaborador') or f'item {i + 1}'
+            for e in erros:
+                erros_itens.append(f'{nome}: {e}')
+
+    erros_lote = pedcom_validar_lote(resultado['itens'])
+
+    todos_erros = erros_itens + erros_lote
+    if todos_erros:
+        return jsonify({
+            'ok': False,
+            'erros': todos_erros,
+            'avisos': resultado['avisos'],
+        }), 422
+
+    # Preview para confirmação — sem dados sensíveis desnecessários
+    preview = [
+        {
+            'nome_colaborador': item.get('nome_colaborador', ''),
+            'codfornecedor':    item.get('CODFORNECEDOR', ''),
+            'lojafornec':       item.get('LOJAFORNEC', ''),
+            'codigocond':       item.get('CODIGOCOND', ''),
+            'codigoproduto':    item.get('CODIGOPRODUTO', ''),
+            'mesinicial':       item.get('MESINICIAL', ''),
+            'anoreferencia':    item.get('ANOREFERENCIA', ''),
+            'qtdmeses':         item.get('QTDMESES', ''),
+            'qtd_rateios':      len(item.get('rateios', [])),
+            'rateios':          item.get('rateios', []),
+        }
+        for item in resultado['itens']
+    ]
+
+    return jsonify({
+        'ok': True,
+        'total': len(resultado['itens']),
+        'codcc': resultado['codcc'],
+        'codclvl': resultado['codclvl'],
+        'avisos': resultado['avisos'],
+        'preview': preview,
+        # Payload completo para reenvio na confirmação (evita reler o arquivo)
+        'itens': resultado['itens'],
+    }), 200
+
+
+# ─── API: disparar lote ───────────────────────────────────────────────────────
+
+@app.route('/api/rh/pedcom/lote', methods=['POST'])
+@acesso_relatorio_requerido('rh', 'pedcom')
+def api_rh_pedcom_criar_lote():
+    """Persiste o lote no banco e dispara o processamento em background.
+
+    Body JSON esperado:
+      { "nome_lote": "...", "itens": [...] }   (itens vêm do /importar)
+    """
+    dados = request.get_json(silent=True) or {}
+
+    itens = dados.get('itens', [])
+    if not itens:
+        return jsonify({'erro': 'Nenhum item para processar.'}), 400
+
+    # Re-valida no servidor (o cliente pode ter adulterado o payload)
+    erros_lote = pedcom_validar_lote(itens)
+    if erros_lote:
+        return jsonify({'erro': '; '.join(erros_lote)}), 422
+
+    erros_itens = []
+    for i, item in enumerate(itens):
+        erros = pedcom_validar_item(item)
+        if erros:
+            nome = item.get('nome_colaborador') or f'item {i + 1}'
+            erros_itens.append(f'{nome}: {"; ".join(erros)}')
+    if erros_itens:
+        return jsonify({'erro': ' | '.join(erros_itens)}), 422
+
+    nome_lote = str(dados.get('nome_lote', 'Lote manual')).strip()[:200] or 'Lote manual'
+
+    try:
+        lote_id = pedcom_persistir_lote(
+            itens=itens,
+            usuario_id=session.get('usuario_id'),
+            usuario_nome=session.get('usuario_nome', ''),
+            nome_lote=nome_lote,
+        )
+    except Exception as e:
+        return jsonify({'erro': f'Erro ao salvar o lote: {e}'}), 500
+
+    pedcom_iniciar_lote_async(lote_id)
+
+    registrar_log(
+        f'pedcom_lote_criado:{lote_id}',
+        session.get('usuario_id'),
+        session.get('usuario_nome'),
+    )
+
+    return jsonify({
+        'ok': True,
+        'lote_id': lote_id,
+        'mensagem': f'Lote {lote_id} criado e em processamento.',
+    }), 201
+
+
+# ─── API: status do lote (polling) ───────────────────────────────────────────
+
+@app.route('/api/rh/pedcom/lote/<int:lote_id>/status', methods=['GET'])
+@acesso_relatorio_requerido('rh', 'pedcom')
+def api_rh_pedcom_status_lote(lote_id):
+    """Retorna o status atual do lote e de cada item para polling do frontend."""
+    dados = pedcom_obter_status_lote(lote_id)
+    if dados is None:
+        return jsonify({'erro': 'Lote não encontrado.'}), 404
+    return jsonify(dados), 200
+
+
+# ─── API: detalhe de um lote (histórico) ─────────────────────────────────────
+
+@app.route('/api/rh/pedcom/lote/<int:lote_id>', methods=['GET'])
+@acesso_relatorio_requerido('rh', 'pedcom')
+def api_rh_pedcom_detalhe_lote(lote_id):
+    """Retorna o lote completo com todos os itens (para a página de histórico)."""
+    dados = pedcom_obter_status_lote(lote_id)
+    if dados is None:
+        return jsonify({'erro': 'Lote não encontrado.'}), 404
+    return jsonify(dados), 200
+
+
+# ─── API: lista de lotes (histórico paginado) ─────────────────────────────────
+
+@app.route('/api/rh/pedcom/lotes', methods=['GET'])
+@acesso_relatorio_requerido('rh', 'pedcom')
+def api_rh_pedcom_listar_lotes():
+    """Lista os lotes mais recentes, paginado, para a página de histórico."""
+    try:
+        pagina     = max(1, int(request.args.get('pagina', 1)))
+        por_pagina = min(50, max(1, int(request.args.get('por_pagina', 20))))
+    except (ValueError, TypeError):
+        pagina, por_pagina = 1, 20
+
+    return jsonify(pedcom_listar_lotes(pagina, por_pagina)), 200
 
 
 # ─── Bootstrap por worker ────────────────────────────────────────────────────
