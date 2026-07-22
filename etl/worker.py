@@ -136,49 +136,90 @@ def _destinatarios_alerta() -> list[str]:
     return [e.strip() for e in raw.split(',') if e.strip()]
 
 
-def _enviar_alerta_falha(erros: Sequence[str], duracao_s: int) -> None:
-    """Envia e-mail de alerta para cada destinatário configurado."""
+def _enviar_email_todos(subject: str, html: str) -> None:
+    """Envia o mesmo e-mail para todos os destinatários configurados."""
     destinatarios = _destinatarios_alerta()
     if not destinatarios:
         return
+    for dest in destinatarios:
+        resultado = enviar_email({'to': dest, 'subject': subject, 'html': html})
+        if resultado['ok']:
+            print(f'[ETL] E-mail enviado para {dest}.')
+        else:
+            print(f'[ETL] Falha ao enviar e-mail para {dest}: {resultado.get("error")}')
 
+
+def _enviar_alerta_falha(erros: Sequence[str], duracao_s: int) -> None:
+    """E-mail de alerta quando o full refresh termina com erros."""
     agora_str  = _agora().strftime('%d/%m/%Y às %H:%M')
     erros_html = ''.join(
-        f'<li style="margin-bottom:6px"><code style="background:#f5f5f5;padding:2px 6px">'
-        f'{e}</code></li>'
+        f'<li style="margin-bottom:6px">'
+        f'<code style="background:#f5f5f5;padding:2px 6px">{e}</code></li>'
         for e in erros
     )
-
     html = f"""
     <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto">
-      <div style="background:#1a1a1a;color:#fff;padding:20px 24px;border-radius:4px 4px 0 0">
-        <h2 style="margin:0;font-size:18px">ETL — Alerta de Falha no Full Refresh</h2>
+      <div style="background:#b91c1c;color:#fff;padding:20px 24px;border-radius:4px 4px 0 0">
+        <h2 style="margin:0;font-size:18px">ETL — Falha no Full Refresh</h2>
       </div>
       <div style="border:1px solid #e0e0e0;border-top:none;padding:24px;border-radius:0 0 4px 4px">
         <p style="margin-top:0">O full refresh de <strong>{agora_str}</strong>
         terminou com <strong>{len(erros)} erro(s)</strong> em {duracao_s}s.</p>
-
         <p><strong>Módulos com falha:</strong></p>
         <ul style="padding-left:20px">{erros_html}</ul>
-
         <p style="margin-bottom:0;color:#666;font-size:13px">
-          Verifique os logs do container ETL para mais detalhes:<br>
+          Verifique os logs para mais detalhes:<br>
           <code>docker compose logs etl</code>
         </p>
       </div>
-    </div>
-    """
+    </div>"""
+    _enviar_email_todos(
+        subject=f'[ProtheusData] ETL — Falha no full refresh ({agora_str})',
+        html=html,
+    )
 
-    for dest in destinatarios:
-        resultado = enviar_email({
-            'to':      dest,
-            'subject': f'[ProtheusData] ETL — Falha no full refresh ({agora_str})',
-            'html':    html,
-        })
-        if resultado['ok']:
-            print(f'[ETL] Alerta enviado para {dest}.')
-        else:
-            print(f'[ETL] Falha ao enviar alerta para {dest}: {resultado.get("error")}')
+
+def _enviar_alerta_sucesso(resumo: list[tuple[str, int]], duracao_s: int) -> None:
+    """E-mail de confirmação quando o full refresh conclui sem erros."""
+    agora_str   = _agora().strftime('%d/%m/%Y às %H:%M')
+    total_geral = sum(n for _, n in resumo)
+    linhas_html = ''.join(
+        f'<tr>'
+        f'<td style="padding:6px 12px;border-bottom:1px solid #f0f0f0">{nome}</td>'
+        f'<td style="padding:6px 12px;border-bottom:1px solid #f0f0f0;text-align:right">'
+        f'{n:,}</td>'
+        f'</tr>'
+        for nome, n in resumo
+    )
+    html = f"""
+    <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto">
+      <div style="background:#1a1a1a;color:#fff;padding:20px 24px;border-radius:4px 4px 0 0">
+        <h2 style="margin:0;font-size:18px">ETL — Full Refresh Concluído</h2>
+      </div>
+      <div style="border:1px solid #e0e0e0;border-top:none;padding:24px;border-radius:0 0 4px 4px">
+        <p style="margin-top:0">
+          Full refresh de <strong>{agora_str}</strong> concluído com sucesso
+          em <strong>{duracao_s}s</strong>.
+          Total processado: <strong>{total_geral:,} registros/mutações</strong>.
+        </p>
+        <table style="width:100%;border-collapse:collapse;font-size:14px">
+          <thead>
+            <tr style="background:#f5f5f5">
+              <th style="padding:8px 12px;text-align:left;border-bottom:2px solid #e0e0e0">Módulo</th>
+              <th style="padding:8px 12px;text-align:right;border-bottom:2px solid #e0e0e0">Registros</th>
+            </tr>
+          </thead>
+          <tbody>{linhas_html}</tbody>
+        </table>
+        <p style="margin-bottom:0;margin-top:16px;color:#666;font-size:13px">
+          Os dados da plataforma estão atualizados e consistentes.
+        </p>
+      </div>
+    </div>"""
+    _enviar_email_todos(
+        subject=f'[ProtheusData] ETL — Full refresh concluído ({agora_str})',
+        html=html,
+    )
 
 
 # ── Locks (evita sobreposição de jobs) ───────────────────────────────────────
@@ -271,13 +312,15 @@ def executar_full_refresh():
     inicio = _agora()
     print(f'[ETL] ══════ FULL REFRESH INICIADO ({inicio:%d/%m/%Y %H:%M}) ══════')
 
-    erros = []
+    erros  : list[str]         = []
+    resumo : list[tuple[str, int]] = []   # (nome, qtd) para e-mail de conclusão
 
     try:
         # Fase 1: Módulos hash-based (sequencial — evita pico no Protheus)
         for nome, fn in _JOBS_HASH:
             try:
                 mutacoes = fn()
+                resumo.append((nome, mutacoes))
                 print(f'[ETL] Full refresh — {nome}: {mutacoes} mutação(ões).')
             except Exception as exc:
                 erros.append(f'{nome}: {exc}')
@@ -291,6 +334,7 @@ def executar_full_refresh():
         for nome, fn in _JOBS_FINANCEIRO:
             try:
                 total = fn()
+                resumo.append((nome, total))
                 print(f'[ETL] Full refresh — {nome}: {total} registros.')
             except Exception as exc:
                 erros.append(f'{nome}: {exc}')
@@ -310,6 +354,7 @@ def executar_full_refresh():
     duracao = int((_agora() - inicio).total_seconds())
     status  = 'com erros' if erros else 'concluído'
     print(f'[ETL] ══════ FULL REFRESH {status.upper()} em {duracao}s ══════')
+
     if erros:
         for e in erros:
             print(f'[ETL]   → {e}')
@@ -317,6 +362,11 @@ def executar_full_refresh():
             _enviar_alerta_falha(erros, duracao)
         except Exception as exc:
             print(f'[ETL] Erro ao enviar alerta de falha: {exc}')
+    else:
+        try:
+            _enviar_alerta_sucesso(resumo, duracao)
+        except Exception as exc:
+            print(f'[ETL] Erro ao enviar e-mail de conclusão: {exc}')
 
 
 # ── Sync incremental ───────────────────────────────────────────────────────────
