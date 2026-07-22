@@ -14,6 +14,7 @@ from services.relatorios.financeiro.base import (
     _lookback_dias,
     carga_inicial, sincronizar, info_relatorio, historico_sync,
     gerar_csv, gerar_excel, construir_upsert_sql,
+    limpar_para_refresh,
 )
 
 # Janela baseada em E2_VENCTO (alias Vencimento). Títulos Energy em atraso podem
@@ -138,6 +139,12 @@ def _upsert(conn, linhas):
 
 def carga_inicial_energy_contas_pagar():
     return carga_inicial(CURSOR_KEY, QUERY_PAGINADA, TABELA, SYNC_LOG, _upsert)
+
+
+def full_refresh_energy_contas_pagar() -> int:
+    """Full refresh: limpa tabela + cursor e recarrega tudo do Protheus."""
+    limpar_para_refresh(TABELA, CURSOR_KEY)
+    return carga_inicial_energy_contas_pagar()
 
 
 def sincronizar_energy_contas_pagar():

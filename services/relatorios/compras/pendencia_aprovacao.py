@@ -228,6 +228,21 @@ def _calcular_data_corte(data_maxima):
 
 # ─── Funções públicas ─────────────────────────────────────────────────────────
 
+def carga_completa() -> int:
+    """Full refresh baseado em hash: detecta e aplica apenas as mudanças reais."""
+    from services.sync_engine import full_refresh_com_hash
+    return full_refresh_com_hash(
+        tabela         = 'pendencia_aprovacao',
+        chave_colunas  = ['filial', 'pedido_compra', 'nivel_aprovacao'],
+        chave_idx      = (1, 2, 7),
+        conn_fn        = conectar_pedidos,
+        query_completa = QUERY_COMPLETA,
+        insert_sql     = INSERT_PENDENCIA,
+        norm_row       = lambda l: tuple(_norm(v) for v in l),
+        registrar_sync_fn = _registrar_sync,
+    )
+
+
 def carga_inicial():
     conn = conectar_pedidos()
     total = conn.execute('SELECT COUNT(*) FROM pendencia_aprovacao').fetchone()[0]

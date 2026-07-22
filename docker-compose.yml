@@ -26,3 +26,27 @@ services:
     volumes:
       - ./data:/app/data
     restart: unless-stopped
+
+  etl:
+    build: .
+    container_name: orders_consult_etl
+    command: python3 -u etl/worker.py
+    env_file:
+      - .env
+    environment:
+      TZ: America/Sao_Paulo
+      APP_TIMEZONE: America/Sao_Paulo
+      # Hora do full refresh diário (0–23, padrão: 2 = 02:00)
+      ETL_FULL_REFRESH_HORA: "2"
+      PROTHEUS_CONNECT_TIMEOUT: "30"
+      PROTHEUS_QUERY_TIMEOUT: "120"
+      PROTHEUS_MAX_RETRIES: "2"
+      SYNC_LOOKBACK_PEDIDOS: "60"
+      SYNC_LOOKBACK_HISTORICO: "30"
+      SYNC_LOOKBACK_NF: "30"
+      SYNC_LOOKBACK_MOV_BANCARIOS: "30"
+      SYNC_LOOKBACK_TITULOS: "365"
+      SYNC_LOOKBACK_DAYS: "30"
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

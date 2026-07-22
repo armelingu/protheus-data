@@ -5,6 +5,7 @@ from .base import (
     _lookback_dias,
     carga_inicial, sincronizar, info_relatorio, historico_sync,
     gerar_csv, gerar_excel, construir_upsert_sql,
+    limpar_para_refresh,
 )
 
 # NFs são imutáveis após emissão; 30 dias captura entradas tardias.
@@ -108,6 +109,12 @@ def _upsert(conn, linhas):
 
 def carga_inicial_nf_saida():
     return carga_inicial(CURSOR_KEY, QUERY_PAGINADA, TABELA, SYNC_LOG, _upsert)
+
+
+def full_refresh_nf_saida() -> int:
+    """Full refresh: limpa tabela + cursor e recarrega tudo do Protheus."""
+    limpar_para_refresh(TABELA, CURSOR_KEY)
+    return carga_inicial_nf_saida()
 
 
 def sincronizar_nf_saida():

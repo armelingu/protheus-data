@@ -299,6 +299,21 @@ def _upsert_no_sqlite(linhas, data_corte=None):
 # API pública
 # ---------------------------------------------------------------------------
 
+def carga_completa() -> int:
+    """Full refresh baseado em hash: detecta e aplica apenas as mudanças reais."""
+    from services.sync_engine import full_refresh_com_hash
+    return full_refresh_com_hash(
+        tabela         = TABELA,
+        chave_colunas  = ['filial', 'pedido_compra', 'item'],
+        chave_idx      = (1, 2, 3),
+        conn_fn        = conectar_pedidos,
+        query_completa = QUERY_COMPLETA,
+        insert_sql     = INSERT_PEDIDO,
+        norm_row       = lambda l: tuple(_norm(v) for v in l),
+        registrar_sync_fn = registrar_sync_event,
+    )
+
+
 def carga_inicial():
     conn = conectar_pedidos()
     total = conn.execute(f'SELECT COUNT(*) FROM {TABELA}').fetchone()[0]

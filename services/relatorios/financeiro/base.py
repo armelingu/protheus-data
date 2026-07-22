@@ -86,6 +86,17 @@ def registrar_sync(sync_log_tabela, novos, status, erro_resumo=None):
 
 # ─── Extração em páginas (carga inicial) ──────────────────────────────────────
 
+def limpar_para_refresh(sqlite_tabela: str, nome_cursor: str) -> None:
+    """Limpa a tabela de dados e o cursor de paginação para forçar carga completa."""
+    conn = conectar_financeiro()
+    try:
+        conn.execute(f'DELETE FROM {sqlite_tabela}')
+        conn.execute('DELETE FROM sync_cursor WHERE tabela = ?', (nome_cursor,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def carga_inicial(nome_cursor, query_paginada, sqlite_tabela, sync_log_tabela, fn_upsert):
     """Executa carga inicial via keyset se a tabela estiver vazia."""
     conn = conectar_financeiro()

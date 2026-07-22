@@ -209,6 +209,25 @@ def _substituir_snapshot(dados, total_protheus=None):
     return alterados
 
 
+def carga_completa() -> int:
+    """Full refresh baseado em hash: detecta e aplica apenas as mudanças reais.
+
+    A chave única de estoque_saldos é (produto, filial, armazem).
+    Após normalização por _normalizar_linhas, os índices são: produto=0, filial=2, armazem=3.
+    """
+    from services.sync_engine import full_refresh_com_hash
+    return full_refresh_com_hash(
+        tabela         = 'estoque_saldos',
+        chave_colunas  = ['produto', 'filial', 'armazem'],
+        chave_idx      = (0, 2, 3),
+        conn_fn        = conectar_pedidos,
+        query_completa = QUERY_ESTOQUE,
+        insert_sql     = INSERT_ESTOQUE,
+        norm_row       = lambda l: _normalizar_linhas([l])[0],
+        registrar_sync_fn = registrar_sync_event,
+    )
+
+
 def carga_inicial():
     conn = conectar_pedidos()
     total = conn.execute('SELECT COUNT(*) FROM estoque_saldos').fetchone()[0]

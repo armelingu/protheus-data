@@ -5,6 +5,7 @@ from .base import (
     _lookback_dias,
     carga_inicial, sincronizar, info_relatorio, historico_sync,
     gerar_csv, gerar_excel, construir_upsert_sql,
+    limpar_para_refresh,
 )
 
 # Movimentos bancários raramente são alterados retroativamente; 30 dias suficiente.
@@ -87,6 +88,12 @@ def _upsert(conn, linhas):
 
 def carga_inicial_mov_bancarios():
     return carga_inicial(CURSOR_KEY, QUERY_PAGINADA, TABELA, SYNC_LOG, _upsert)
+
+
+def full_refresh_mov_bancarios() -> int:
+    """Full refresh: limpa tabela + cursor e recarrega tudo do Protheus."""
+    limpar_para_refresh(TABELA, CURSOR_KEY)
+    return carga_inicial_mov_bancarios()
 
 
 def sincronizar_mov_bancarios():

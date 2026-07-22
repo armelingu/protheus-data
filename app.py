@@ -30,6 +30,7 @@ from services.relatorios.compras.pedidos import (
     historico_sync as historico_sync_pedidos,
     sincronizar as sincronizar_pedidos,
     carga_inicial as carga_inicial_pedidos,
+    carga_completa as carga_completa_pedidos,
     registrar_sync_event as registrar_sync_event_pedidos,
 )
 from services.relatorios.energy.pedidos import (
@@ -80,6 +81,7 @@ from services.relatorios.compras.pedidos_detalhado import (
     historico_sync as historico_sync_pedidos_detalhado,
     sincronizar as sincronizar_pedidos_detalhado,
     carga_inicial as carga_inicial_pedidos_detalhado,
+    carga_completa as carga_completa_pedidos_detalhado,
     registrar_sync_event as registrar_sync_event_pedidos_detalhado,
 )
 from services.relatorios.estoque.saldos import (
@@ -4395,6 +4397,52 @@ def api_admin_reenviar_email(usuario_id):
     }), 200
 
 
+@app.route('/api/admin/full-refresh', methods=['POST'])
+@admin_requerido
+def api_admin_full_refresh():
+    """Dispara full refresh de um relatório específico ou de todos (modo admin).
+
+    Body JSON: {"relatorio": "pedidos"} ou {"relatorio": "todos"} para todos.
+    O job roda em background thread para não bloquear a resposta HTTP.
+    """
+    dados     = request.get_json() or {}
+    relatorio = (dados.get('relatorio') or 'todos').strip().lower()
+
+    _MAP_FULL_REFRESH = {
+        'pedidos':            carga_completa_pedidos,
+        'pedidos_detalhado':  carga_completa_pedidos_detalhado,
+    }
+
+    def _rodar_em_background(fn, nome):
+        try:
+            mutacoes = fn()
+            print(f'[ADMIN] Full refresh — {nome}: {mutacoes} mutação(ões).')
+        except Exception as exc:
+            print(f'[ADMIN] Full refresh — {nome}: ERRO: {exc}')
+
+    def _rodar_todos():
+        try:
+            from etl.worker import executar_full_refresh
+            executar_full_refresh()
+        except Exception as exc:
+            print(f'[ADMIN] Full refresh (todos) falhou: {exc}')
+
+    if relatorio == 'todos':
+        t = threading.Thread(target=_rodar_todos, daemon=True, name='admin-full-refresh-todos')
+        t.start()
+        return jsonify({'mensagem': 'Full refresh de todos os relatórios iniciado em background.'}), 202
+
+    fn = _MAP_FULL_REFRESH.get(relatorio)
+    if not fn:
+        disponiveis = list(_MAP_FULL_REFRESH.keys()) + ['todos']
+        return jsonify({'erro': f'Relatório desconhecido. Disponíveis: {disponiveis}'}), 400
+
+    t = threading.Thread(target=_rodar_em_background, args=(fn, relatorio), daemon=True,
+                         name=f'admin-full-refresh-{relatorio}')
+    t.start()
+    return jsonify({'mensagem': f'Full refresh de "{relatorio}" iniciado em background.'}), 202
+
+
 @app.route('/api/admin/logs', methods=['GET'])
 @admin_requerido
 def api_admin_logs():
@@ -4582,8 +4630,10 @@ def inicializar():
     if criar_backup_diario():
         print('[BACKUP] Backup diário criado com sucesso.')
 
-    agendar_proximo_sync()
-    print(f'[SYNC] Próximo sync agendado para {calcular_proximo_sync()}.')
+    # O agendamento automático é responsabilidade do serviço 'etl' (etl/worker.py).
+    # O app.py não inicia mais timers próprios para evitar conflito com o ETL container.
+    # Syncs manuais continuam funcionando via /api/.../sync (disparado pelo usuário).
+    print(f'[SYNC] Próximo sync automático: {calcular_proximo_sync()} (via ETL worker).')
 
 
 

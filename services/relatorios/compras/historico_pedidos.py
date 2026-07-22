@@ -254,6 +254,21 @@ def _calcular_data_corte_historico(data_emissao_maxima):
     return format_protheus_date(data_corte)
 
 
+def carga_completa_historico() -> int:
+    """Full refresh baseado em hash: detecta e aplica apenas as mudanças reais."""
+    from services.sync_engine import full_refresh_com_hash
+    return full_refresh_com_hash(
+        tabela         = 'pedidos_historico',
+        chave_colunas  = ['filial', 'pedido_compra', 'item'],
+        chave_idx      = (1, 2, 3),
+        conn_fn        = conectar_pedidos,
+        query_completa = QUERY_HISTORICO_COMPLETA,
+        insert_sql     = INSERT_HISTORICO,
+        norm_row       = lambda l: tuple(str(v).strip() if v is not None else '' for v in l),
+        registrar_sync_fn = registrar_sync_event_historico,
+    )
+
+
 def carga_inicial_historico():
     conn = conectar_pedidos()
     total = conn.execute('SELECT COUNT(*) FROM pedidos_historico').fetchone()[0]
