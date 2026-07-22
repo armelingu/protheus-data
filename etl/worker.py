@@ -24,6 +24,7 @@ import time
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
+from typing import Sequence
 
 # Garante que o path /app (raiz do projeto) esteja no sys.path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -45,6 +46,7 @@ except Exception:
 # ── Imports de serviços ───────────────────────────────────────────────────────
 
 from services.database import criar_tabelas, criar_backup_diario
+from services.email_service import enviar_email
 
 # Compras
 from services.relatorios.compras.pedidos import (
@@ -125,6 +127,59 @@ from services.relatorios.financeiro.mov_bancarios import (
     sincronizar_mov_bancarios,
     carga_inicial_mov_bancarios,
 )
+
+# ── Alertas de falha ──────────────────────────────────────────────────────────
+
+def _destinatarios_alerta() -> list[str]:
+    """Lê ETL_ALERT_EMAILS do .env e retorna lista de endereços."""
+    raw = os.getenv('ETL_ALERT_EMAILS', '').strip()
+    return [e.strip() for e in raw.split(',') if e.strip()]
+
+
+def _enviar_alerta_falha(erros: Sequence[str], duracao_s: int) -> None:
+    """Envia e-mail de alerta para cada destinatário configurado."""
+    destinatarios = _destinatarios_alerta()
+    if not destinatarios:
+        return
+
+    agora_str  = _agora().strftime('%d/%m/%Y às %H:%M')
+    erros_html = ''.join(
+        f'<li style="margin-bottom:6px"><code style="background:#f5f5f5;padding:2px 6px">'
+        f'{e}</code></li>'
+        for e in erros
+    )
+
+    html = f"""
+    <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto">
+      <div style="background:#1a1a1a;color:#fff;padding:20px 24px;border-radius:4px 4px 0 0">
+        <h2 style="margin:0;font-size:18px">ETL — Alerta de Falha no Full Refresh</h2>
+      </div>
+      <div style="border:1px solid #e0e0e0;border-top:none;padding:24px;border-radius:0 0 4px 4px">
+        <p style="margin-top:0">O full refresh de <strong>{agora_str}</strong>
+        terminou com <strong>{len(erros)} erro(s)</strong> em {duracao_s}s.</p>
+
+        <p><strong>Módulos com falha:</strong></p>
+        <ul style="padding-left:20px">{erros_html}</ul>
+
+        <p style="margin-bottom:0;color:#666;font-size:13px">
+          Verifique os logs do container ETL para mais detalhes:<br>
+          <code>docker compose logs etl</code>
+        </p>
+      </div>
+    </div>
+    """
+
+    for dest in destinatarios:
+        resultado = enviar_email({
+            'to':      dest,
+            'subject': f'[ProtheusData] ETL — Falha no full refresh ({agora_str})',
+            'html':    html,
+        })
+        if resultado['ok']:
+            print(f'[ETL] Alerta enviado para {dest}.')
+        else:
+            print(f'[ETL] Falha ao enviar alerta para {dest}: {resultado.get("error")}')
+
 
 # ── Locks (evita sobreposição de jobs) ───────────────────────────────────────
 _full_refresh_lock = threading.Lock()
@@ -258,6 +313,10 @@ def executar_full_refresh():
     if erros:
         for e in erros:
             print(f'[ETL]   → {e}')
+        try:
+            _enviar_alerta_falha(erros, duracao)
+        except Exception as exc:
+            print(f'[ETL] Erro ao enviar alerta de falha: {exc}')
 
 
 # ── Sync incremental ───────────────────────────────────────────────────────────
