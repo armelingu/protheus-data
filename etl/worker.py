@@ -228,17 +228,18 @@ def executar_full_refresh():
                 erros.append(f'{nome}: {exc}')
                 print(f'[ETL] Full refresh — {nome}: ERRO: {exc}')
 
-        # Fase 2: Financeiro em paralelo (paginação independente por tabela)
-        with ThreadPoolExecutor(max_workers=3, thread_name_prefix='etl-fin') as pool:
-            futs = {pool.submit(fn): nome for nome, fn in _JOBS_FINANCEIRO}
-            for fut in as_completed(futs):
-                nome = futs[fut]
-                try:
-                    total = fut.result()
-                    print(f'[ETL] Full refresh — {nome}: {total} registros.')
-                except Exception as exc:
-                    erros.append(f'{nome}: {exc}')
-                    print(f'[ETL] Full refresh — {nome}: ERRO: {exc}')
+        # Fase 2: Financeiro sequencial no full refresh.
+        # Todos os módulos financeiros compartilham o mesmo financeiro.db;
+        # rodar em paralelo provoca "database is locked" porque cada full_refresh
+        # executa múltiplas transações de escrita (DELETE + batches de INSERT).
+        # No sync incremental (fase rápida) continuamos usando threads.
+        for nome, fn in _JOBS_FINANCEIRO:
+            try:
+                total = fn()
+                print(f'[ETL] Full refresh — {nome}: {total} registros.')
+            except Exception as exc:
+                erros.append(f'{nome}: {exc}')
+                print(f'[ETL] Full refresh — {nome}: ERRO: {exc}')
 
         # Backup diário após full refresh bem-sucedido
         if not erros:
