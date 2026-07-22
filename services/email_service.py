@@ -1,72 +1,114 @@
-import os
-import smtplib
-from email.message import EmailMessage
+"""
+Serviço de e-mail via Microsoft Graph API (OAuth2 client_credentials).
 
-def _bool_env(nome, default=False):
+Fluxo:
+  1. Obtém token de acesso em /oauth2/v2.0/token (client_credentials)
+  2. Chama POST /v1.0/users/{sender}/sendMail com o token Bearer
+  3. Token é cacheado em memória por até 55 min (expira em 60 min por padrão)
+
+Permissão necessária no Entra:
+  Aplicativo → Permissões de API → Microsoft Graph → Mail.Send (Application)
+  + consentimento de administrador concedido
+"""
+from __future__ import annotations
+
+import os
+import time
+
+import requests
+
+
+# ─── Utilitários de ambiente ─────────────────────────────────────────────────
+
+def _str_env(nome: str, default: str = '') -> str:
+    return os.getenv(nome, default).strip()
+
+
+def _bool_env(nome: str, default: bool = False) -> bool:
     valor = os.getenv(nome, 'true' if default else 'false').strip().lower()
     return valor in {'1', 'true', 'yes', 'on'}
 
 
-def _str_env(nome, default=''):
-    return os.getenv(nome, default).strip()
+# ─── Cache de token OAuth2 ───────────────────────────────────────────────────
+
+_token_cache: tuple[str, float] | None = None   # (access_token, expires_at)
 
 
-def _provider_label(provider):
-    if provider == 'gmail':
-        return 'Gmail'
-    if provider in {'outlook', 'office365', 'm365'}:
-        return 'Outlook'
-    return 'e-mail'
+def _obter_token(tenant_id: str, client_id: str, client_secret: str) -> str:
+    """Obtém (ou reutiliza do cache) um token OAuth2 client_credentials."""
+    global _token_cache
+    agora = time.monotonic()
+
+    if _token_cache and agora < _token_cache[1]:
+        return _token_cache[0]
+
+    url  = f'https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token'
+    resp = requests.post(
+        url,
+        data={
+            'grant_type':    'client_credentials',
+            'client_id':     client_id,
+            'client_secret': client_secret,
+            'scope':         'https://graph.microsoft.com/.default',
+        },
+        timeout=15,
+    )
+
+    if not resp.ok:
+        raise RuntimeError(
+            f'Falha ao obter token OAuth2 ({resp.status_code}): {resp.text[:300]}'
+        )
+
+    dados       = resp.json()
+    token       = dados['access_token']
+    expires_in  = int(dados.get('expires_in', 3600))
+    _token_cache = (token, agora + expires_in - 300)   # renova 5 min antes
+    return token
 
 
-def configuracao_email():
-    provider = _str_env('EMAIL_PROVIDER', '').lower() or 'gmail'
-    smtp_host = _str_env('SMTP_HOST', '')
-    smtp_port = _str_env('SMTP_PORT', '587') or '587'
+def _invalidar_token() -> None:
+    global _token_cache
+    _token_cache = None
 
-    if provider == 'gmail':
-        smtp_host = smtp_host or 'smtp.gmail.com'
-        smtp_port = smtp_port or '587'
 
-    if provider in {'outlook', 'office365', 'm365'}:
-        smtp_host = smtp_host or 'smtp.office365.com'
-        smtp_port = smtp_port or '587'
+# ─── Configuração ─────────────────────────────────────────────────────────────
 
+def configuracao_email() -> dict:
     return {
-        'enabled': _bool_env('EMAIL_ENABLED', False),
-        'provider': provider,
-        'from': _str_env('EMAIL_FROM', ''),
-        'smtp_host': smtp_host,
-        'smtp_port': int(smtp_port),
-        'smtp_username': _str_env('SMTP_USERNAME', ''),
-        'smtp_password': _str_env('SMTP_PASSWORD', ''),
-        'smtp_use_tls': _bool_env('SMTP_USE_TLS', True),
-        'app_base_url': _str_env('APP_BASE_URL', 'http://127.0.0.1:5000').rstrip('/'),
+        'enabled':       _bool_env('EMAIL_ENABLED', False),
+        'provider':      _str_env('EMAIL_PROVIDER', 'msgraph').lower(),
+        'from':          _str_env('EMAIL_FROM', ''),
+        'tenant_id':     _str_env('MS_TENANT_ID', ''),
+        'client_id':     _str_env('MS_CLIENT_ID', ''),
+        'client_secret': _str_env('MS_CLIENT_SECRET', ''),
+        'app_base_url':  _str_env('APP_BASE_URL', 'http://127.0.0.1:5000').rstrip('/'),
     }
 
 
-def configuracao_email_valida():
-    config = configuracao_email()
-    provider_label = _provider_label(config['provider'])
-
-    if not config['enabled']:
-        return False, f'Envio de e-mail via {provider_label} ainda não configurado.'
-    campos_obrigatorios = ('from', 'smtp_host', 'smtp_username')
-    for campo in campos_obrigatorios:
-        if not config[campo]:
-            return False, f'Configuração incompleta do {provider_label}: {campo}.'
-    if not config['smtp_password']:
-        return False, f'Configuração incompleta do {provider_label}: smtp_password.'
+def configuracao_email_valida() -> tuple[bool, str | None]:
+    cfg = configuracao_email()
+    if not cfg['enabled']:
+        return False, 'Envio de e-mail não está habilitado (EMAIL_ENABLED).'
+    for campo in ('from', 'tenant_id', 'client_id', 'client_secret'):
+        if not cfg[campo]:
+            return False, f'Configuração incompleta do e-mail: {campo}.'
     return True, None
 
+
+# ─── Montagem do e-mail de acesso ────────────────────────────────────────────
 
 CHAMADOS_URL = 'http://10.0.253.100:5000/ir-para-chamados'
 
 
-def montar_email_acesso(nome, email_destino, login, app_base_url=None):
+def montar_email_acesso(
+    nome: str,
+    email_destino: str,
+    login: str,
+    app_base_url: str | None = None,
+) -> dict:
     app_base_url = (app_base_url or configuracao_email()['app_base_url']).rstrip('/')
-    login_url = f'{app_base_url}/login'
-    assunto = 'Seu acesso foi criado — ProtheusData HBR'
+    login_url    = f'{app_base_url}/login'
+    assunto      = 'Seu acesso foi criado — ProtheusData HBR'
 
     primeiro_nome = nome.split()[0] if nome else nome
 
@@ -174,7 +216,7 @@ def montar_email_acesso(nome, email_destino, login, app_base_url=None):
                            border-left:3px solid #e0a800;">
                   <p style="margin:0;color:#7a5510;font-size:11px;
                             font-weight:700;letter-spacing:0.5px;">
-                    ⚠ Não responda este e-mail
+                    Nao responda este e-mail
                   </p>
                   <p style="margin:4px 0 0;color:#8a6520;font-size:11px;
                             line-height:1.6;">
@@ -203,37 +245,92 @@ def montar_email_acesso(nome, email_destino, login, app_base_url=None):
 </html>"""
 
     return {
-        'to': email_destino,
+        'to':      email_destino,
         'subject': assunto,
-        'body': corpo_texto,
-        'html': corpo_html,
-        'login': login,
-        'url': login_url,
+        'body':    corpo_texto,
+        'html':    corpo_html,
+        'login':   login,
+        'url':     login_url,
     }
 
 
-def enviar_email(payload):
+# ─── Envio via Graph API ──────────────────────────────────────────────────────
+
+def enviar_email(payload: dict) -> dict:
+    """Envia o e-mail usando Microsoft Graph API.
+
+    Parâmetros
+    ----------
+    payload : dict com chaves 'to', 'subject', 'body' (texto plano) e
+              opcionalmente 'html' (corpo HTML — preferido quando presente).
+
+    Retorno
+    -------
+    dict com 'ok' (bool) e 'error' (str | None).
+    """
     valido, erro = configuracao_email_valida()
     if not valido:
         return {'ok': False, 'error': erro}
 
-    config = configuracao_email()
-    mensagem = EmailMessage()
-    mensagem['Subject'] = payload['subject']
-    mensagem['From']    = config['from']
-    mensagem['To']      = payload['to']
-
-    mensagem.set_content(payload['body'])
-
-    if payload.get('html'):
-        mensagem.add_alternative(payload['html'], subtype='html')
+    cfg = configuracao_email()
 
     try:
-        with smtplib.SMTP(config['smtp_host'], config['smtp_port'], timeout=20) as servidor:
-            if config['smtp_use_tls']:
-                servidor.starttls()
-            servidor.login(config['smtp_username'], config['smtp_password'])
-            servidor.send_message(mensagem)
-        return {'ok': True, 'error': None}
+        token = _obter_token(cfg['tenant_id'], cfg['client_id'], cfg['client_secret'])
+    except Exception as exc:
+        return {'ok': False, 'error': f'Erro ao obter token OAuth2: {exc}'}
+
+    conteudo = payload.get('html') or payload.get('body', '')
+    tipo     = 'HTML' if payload.get('html') else 'Text'
+
+    graph_payload = {
+        'message': {
+            'subject': payload['subject'],
+            'body': {
+                'contentType': tipo,
+                'content':     conteudo,
+            },
+            'toRecipients': [
+                {'emailAddress': {'address': payload['to']}}
+            ],
+            'from': {
+                'emailAddress': {'address': cfg['from']}
+            },
+        },
+        'saveToSentItems': True,
+    }
+
+    url = f'https://graph.microsoft.com/v1.0/users/{cfg["from"]}/sendMail'
+
+    try:
+        resp = requests.post(
+            url,
+            json=graph_payload,
+            headers={
+                'Authorization': f'Bearer {token}',
+                'Content-Type':  'application/json',
+            },
+            timeout=30,
+        )
+
+        if resp.status_code == 202:
+            return {'ok': True, 'error': None}
+
+        # Token expirado ou revogado — invalida cache e informa
+        if resp.status_code in (401, 403):
+            _invalidar_token()
+            return {
+                'ok':    False,
+                'error': f'Acesso negado pela Graph API ({resp.status_code}). '
+                         f'Verifique as permissões Mail.Send no Entra. '
+                         f'Detalhe: {resp.text[:300]}',
+            }
+
+        return {
+            'ok':    False,
+            'error': f'Graph API retornou {resp.status_code}: {resp.text[:300]}',
+        }
+
+    except requests.exceptions.Timeout:
+        return {'ok': False, 'error': 'Timeout ao conectar à Graph API (30 s).'}
     except Exception as exc:
         return {'ok': False, 'error': str(exc)}

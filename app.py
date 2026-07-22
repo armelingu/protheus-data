@@ -72,6 +72,16 @@ from services.relatorios.compras.pendencia_aprovacao import (
     carga_inicial as carga_inicial_pendencia_aprovacao,
     listar_aprovadores as listar_aprovadores_pendencia,
 )
+from services.relatorios.compras.pedidos_detalhado import (
+    QUERY_BASE as QUERY_PEDIDOS_DETALHADO,
+    gerar_csv as gerar_csv_pedidos_detalhado,
+    gerar_excel as gerar_excel_pedidos_detalhado,
+    info_relatorio as info_relatorio_pedidos_detalhado,
+    historico_sync as historico_sync_pedidos_detalhado,
+    sincronizar as sincronizar_pedidos_detalhado,
+    carga_inicial as carga_inicial_pedidos_detalhado,
+    registrar_sync_event as registrar_sync_event_pedidos_detalhado,
+)
 from services.relatorios.estoque.saldos import (
     QUERY_ESTOQUE,
     consolidar_sync_log as consolidar_sync_log_estoque,
@@ -121,14 +131,6 @@ from services.relatorios.financeiro.mov_bancarios import (
 )
 from services.email_service import montar_email_acesso, enviar_email
 from services.time_utils import APP_TIMEZONE, agora_sp, parse_db_datetime
-from services.pedcom.importacao import importar_xlsx as pedcom_importar_xlsx
-from services.pedcom.validacao import validar_item as pedcom_validar_item, validar_lote as pedcom_validar_lote
-from services.pedcom.lote import (
-    persistir_lote as pedcom_persistir_lote,
-    iniciar_lote_async as pedcom_iniciar_lote_async,
-    obter_status_lote as pedcom_obter_status_lote,
-    listar_lotes as pedcom_listar_lotes,
-)
 
 load_dotenv()
 
@@ -1415,6 +1417,22 @@ def pagina_relatorio_pendencia_aprovacao():
         query_preview=QUERY_PENDENCIA_APROVACAO if pode_ver_query else '',
         pode_ver_query=pode_ver_query,
         **contexto_auth('ProtheusData - Pendências de Aprovação')
+    )
+
+
+@app.route('/relatorios/compras/pedidos-detalhado')
+@acesso_relatorio_requerido('compras', 'pedidos_detalhado')
+def pagina_relatorio_compras_pedidos_detalhado():
+    modulo, relatorio = obter_relatorio('compras', 'pedidos_detalhado')
+    usuario = usuario_atual()
+    pode_ver_query = bool(usuario and usuario['is_admin'] and usuario['pode_ver_query'])
+    return render_template(
+        'relatorios/compras_pedidos_detalhado.html',
+        modulo_ativo=modulo,
+        relatorio_ativo=relatorio,
+        query_preview=QUERY_PEDIDOS_DETALHADO if pode_ver_query else '',
+        pode_ver_query=pode_ver_query,
+        **contexto_auth('ProtheusData - Pedidos de Compra Detalhado')
     )
 
 
@@ -3578,6 +3596,99 @@ def api_pendencia_aprovacao_download():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# COMPRAS — Pedidos Detalhado (CC / Item Orçamentário / Conta / Cond. Pgto)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route('/api/relatorios/compras/pedidos-detalhado/info', methods=['GET'])
+@acesso_relatorio_requerido('compras', 'pedidos_detalhado')
+def api_pedidos_detalhado_info():
+    try:
+        total, ultimo_sync, status, erro = info_relatorio_pedidos_detalhado()
+        if ultimo_sync:
+            ultimo_sync = parse_db_datetime(ultimo_sync).strftime('%d/%m/%Y %H:%M')
+        else:
+            ultimo_sync = 'Nunca'
+        labels = {
+            'sucesso': 'Novos registros',
+            'sem_novos': 'Sem novidades',
+            'erro': 'Falha no sync',
+            'nunca': 'Nunca executado',
+        }
+        return jsonify({
+            'total_registros': total,
+            'ultima_atualizacao': ultimo_sync,
+            'proximo_sync': calcular_proximo_sync(),
+            'ultimo_sync_status': status,
+            'ultimo_sync_status_label': labels.get(status, 'Desconhecido'),
+            'ultimo_sync_erro': erro,
+        })
+    except Exception:
+        return jsonify({
+            'total_registros': 'Erro',
+            'ultima_atualizacao': 'Falha ao consultar',
+            'proximo_sync': '--',
+            'ultimo_sync_status': 'erro',
+            'ultimo_sync_status_label': 'Falha ao consultar',
+            'ultimo_sync_erro': None,
+        }), 500
+
+
+@app.route('/api/relatorios/compras/pedidos-detalhado/historico-sync', methods=['GET'])
+@acesso_relatorio_requerido('compras', 'pedidos_detalhado')
+def api_pedidos_detalhado_historico_sync():
+    return _historico_sync_response(historico_sync_pedidos_detalhado)
+
+
+@app.route('/api/relatorios/compras/pedidos-detalhado/download', methods=['GET'])
+@acesso_relatorio_requerido('compras', 'pedidos_detalhado')
+def api_pedidos_detalhado_download():
+    formato     = request.args.get('formato', 'csv').lower()
+    data_inicio = _iso_para_protheus(request.args.get('data_inicio'))
+    data_fim    = _iso_para_protheus(request.args.get('data_fim'))
+    try:
+        if formato == 'excel':
+            dados, total = gerar_excel_pedidos_detalhado(data_inicio=data_inicio, data_fim=data_fim)
+            registrar_log('download_excel', session.get('usuario_id'), session.get('usuario_nome'))
+            registrar_download(formato, total)
+            return Response(
+                dados,
+                mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                headers={'Content-Disposition': 'attachment; filename=pedidos_compra_detalhado.xlsx'},
+            )
+        else:
+            dados, total = gerar_csv_pedidos_detalhado(data_inicio=data_inicio, data_fim=data_fim)
+            registrar_log('download_csv', session.get('usuario_id'), session.get('usuario_nome'))
+            registrar_download(formato, total)
+            return Response(
+                dados,
+                mimetype='text/csv',
+                headers={'Content-Disposition': 'attachment; filename=pedidos_compra_detalhado.csv'},
+            )
+    except Exception:
+        return jsonify({'erro': 'Falha ao gerar relatório.'}), 500
+
+
+@app.route('/api/relatorios/compras/pedidos-detalhado/sync', methods=['POST'])
+@acesso_relatorio_requerido('compras', 'pedidos_detalhado')
+def api_pedidos_detalhado_sync():
+    global ultimo_sync_dt
+    if not sync_lock.acquire(blocking=False):
+        return jsonify({'erro': 'Já existe uma sincronização em andamento.'}), 409
+    t0 = time.monotonic()
+    try:
+        novos = sincronizar_pedidos_detalhado()
+        duracao = round(time.monotonic() - t0)
+        ultimo_sync_dt = agora_sp()
+        criar_backup_diario()
+        return jsonify({'registros_novos': novos, 'duracao_segundos': duracao})
+    except Exception as e:
+        registrar_sync_event_pedidos_detalhado(0, 'erro', erro_resumo=str(e)[:200])
+        return jsonify({'erro': 'Falha na sincronização.'}), 500
+    finally:
+        sync_lock.release()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # MÓDULO FINANCEIRO — 5 relatórios (NF Entrada, NF Saída, CR, CP, MB)
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -4408,6 +4519,7 @@ def inicializar():
         total_historico       = carga_inicial_historico()
         total_pendencia       = carga_inicial_pendencia_aprovacao()
         total_conta_05001     = carga_inicial_pedidos_conta_05001()
+        total_pedidos_det     = carga_inicial_pedidos_detalhado()
         if total_pedidos > 0:
             print(f'[STARTUP] Carga inicial de pedidos concluída. {total_pedidos} registros importados.')
         else:
@@ -4432,6 +4544,11 @@ def inicializar():
             print(f'[STARTUP] Carga inicial de pedidos conta 05.001 concluída. {total_conta_05001} registros importados.')
         else:
             print('[STARTUP] Dados de pedidos conta 05.001 já existem no banco local.')
+
+        if total_pedidos_det > 0:
+            print(f'[STARTUP] Carga inicial de pedidos detalhado concluída. {total_pedidos_det} registros importados.')
+        else:
+            print('[STARTUP] Dados de pedidos detalhado já existem no banco local.')
 
         # ── Módulo Financeiro ─────────────────────────────────────────────────
         _financeiro_cargas_iniciais = [
@@ -4469,204 +4586,6 @@ def inicializar():
     print(f'[SYNC] Próximo sync agendado para {calcular_proximo_sync()}.')
 
 
-# ╔══════════════════════════════════════════════════════════════════════════════╗
-# ║  RH — Pedidos de Compra PJ (WSHBPEDC)                                       ║
-# ╚══════════════════════════════════════════════════════════════════════════════╝
-
-# ─── Páginas ─────────────────────────────────────────────────────────────────
-
-@app.route('/rh/pedcom')
-@acesso_relatorio_requerido('rh', 'pedcom')
-def pagina_rh_pedcom():
-    return render_template(
-        'rh/pedcom_lote.html',
-        **contexto_auth('ProtheusData — Pedidos de Compra PJ'),
-    )
-
-
-@app.route('/rh/pedcom/historico')
-@acesso_relatorio_requerido('rh', 'pedcom')
-def pagina_rh_pedcom_historico():
-    return render_template(
-        'rh/pedcom_historico.html',
-        **contexto_auth('ProtheusData — Histórico de Lotes PJ'),
-    )
-
-
-# ─── API: importar planilha (preview + validação) ─────────────────────────────
-
-@app.route('/api/rh/pedcom/importar', methods=['POST'])
-@acesso_relatorio_requerido('rh', 'pedcom')
-def api_rh_pedcom_importar():
-    """Recebe o .xlsx, executa parsing e devolve preview + erros de validação.
-
-    Não persiste nada — apenas valida e retorna os dados para confirmação.
-    """
-    if 'arquivo' not in request.files:
-        return jsonify({'erro': 'Nenhum arquivo enviado.'}), 400
-
-    arquivo = request.files['arquivo']
-    if not arquivo.filename:
-        return jsonify({'erro': 'Arquivo sem nome.'}), 400
-    if not arquivo.filename.lower().endswith('.xlsx'):
-        return jsonify({'erro': 'Apenas arquivos .xlsx são aceitos.'}), 400
-
-    conteudo = arquivo.read()
-    if len(conteudo) > 5 * 1024 * 1024:  # 5 MB
-        return jsonify({'erro': 'Arquivo muito grande (limite: 5 MB).'}), 400
-
-    resultado = pedcom_importar_xlsx(conteudo)
-
-    # Erros estruturais da planilha impedem o envio
-    if resultado['erros']:
-        return jsonify({
-            'ok': False,
-            'erros': resultado['erros'],
-            'avisos': resultado['avisos'],
-        }), 422
-
-    # Validação item a item
-    erros_itens = []
-    for i, item in enumerate(resultado['itens']):
-        erros = pedcom_validar_item(item)
-        if erros:
-            nome = item.get('nome_colaborador') or f'item {i + 1}'
-            for e in erros:
-                erros_itens.append(f'{nome}: {e}')
-
-    erros_lote = pedcom_validar_lote(resultado['itens'])
-
-    todos_erros = erros_itens + erros_lote
-    if todos_erros:
-        return jsonify({
-            'ok': False,
-            'erros': todos_erros,
-            'avisos': resultado['avisos'],
-        }), 422
-
-    # Preview para confirmação — sem dados sensíveis desnecessários
-    preview = [
-        {
-            'nome_colaborador': item.get('nome_colaborador', ''),
-            'codfornecedor':    item.get('CODFORNECEDOR', ''),
-            'lojafornec':       item.get('LOJAFORNEC', ''),
-            'codigocond':       item.get('CODIGOCOND', ''),
-            'codigoproduto':    item.get('CODIGOPRODUTO', ''),
-            'mesinicial':       item.get('MESINICIAL', ''),
-            'anoreferencia':    item.get('ANOREFERENCIA', ''),
-            'qtdmeses':         item.get('QTDMESES', ''),
-            'qtd_rateios':      len(item.get('rateios', [])),
-            'rateios':          item.get('rateios', []),
-        }
-        for item in resultado['itens']
-    ]
-
-    return jsonify({
-        'ok': True,
-        'total': len(resultado['itens']),
-        'codcc': resultado['codcc'],
-        'codclvl': resultado['codclvl'],
-        'avisos': resultado['avisos'],
-        'preview': preview,
-        # Payload completo para reenvio na confirmação (evita reler o arquivo)
-        'itens': resultado['itens'],
-    }), 200
-
-
-# ─── API: disparar lote ───────────────────────────────────────────────────────
-
-@app.route('/api/rh/pedcom/lote', methods=['POST'])
-@acesso_relatorio_requerido('rh', 'pedcom')
-def api_rh_pedcom_criar_lote():
-    """Persiste o lote no banco e dispara o processamento em background.
-
-    Body JSON esperado:
-      { "nome_lote": "...", "itens": [...] }   (itens vêm do /importar)
-    """
-    dados = request.get_json(silent=True) or {}
-
-    itens = dados.get('itens', [])
-    if not itens:
-        return jsonify({'erro': 'Nenhum item para processar.'}), 400
-
-    # Re-valida no servidor (o cliente pode ter adulterado o payload)
-    erros_lote = pedcom_validar_lote(itens)
-    if erros_lote:
-        return jsonify({'erro': '; '.join(erros_lote)}), 422
-
-    erros_itens = []
-    for i, item in enumerate(itens):
-        erros = pedcom_validar_item(item)
-        if erros:
-            nome = item.get('nome_colaborador') or f'item {i + 1}'
-            erros_itens.append(f'{nome}: {"; ".join(erros)}')
-    if erros_itens:
-        return jsonify({'erro': ' | '.join(erros_itens)}), 422
-
-    nome_lote = str(dados.get('nome_lote', 'Lote manual')).strip()[:200] or 'Lote manual'
-
-    try:
-        lote_id = pedcom_persistir_lote(
-            itens=itens,
-            usuario_id=session.get('usuario_id'),
-            usuario_nome=session.get('usuario_nome', ''),
-            nome_lote=nome_lote,
-        )
-    except Exception as e:
-        return jsonify({'erro': f'Erro ao salvar o lote: {e}'}), 500
-
-    pedcom_iniciar_lote_async(lote_id)
-
-    registrar_log(
-        f'pedcom_lote_criado:{lote_id}',
-        session.get('usuario_id'),
-        session.get('usuario_nome'),
-    )
-
-    return jsonify({
-        'ok': True,
-        'lote_id': lote_id,
-        'mensagem': f'Lote {lote_id} criado e em processamento.',
-    }), 201
-
-
-# ─── API: status do lote (polling) ───────────────────────────────────────────
-
-@app.route('/api/rh/pedcom/lote/<int:lote_id>/status', methods=['GET'])
-@acesso_relatorio_requerido('rh', 'pedcom')
-def api_rh_pedcom_status_lote(lote_id):
-    """Retorna o status atual do lote e de cada item para polling do frontend."""
-    dados = pedcom_obter_status_lote(lote_id)
-    if dados is None:
-        return jsonify({'erro': 'Lote não encontrado.'}), 404
-    return jsonify(dados), 200
-
-
-# ─── API: detalhe de um lote (histórico) ─────────────────────────────────────
-
-@app.route('/api/rh/pedcom/lote/<int:lote_id>', methods=['GET'])
-@acesso_relatorio_requerido('rh', 'pedcom')
-def api_rh_pedcom_detalhe_lote(lote_id):
-    """Retorna o lote completo com todos os itens (para a página de histórico)."""
-    dados = pedcom_obter_status_lote(lote_id)
-    if dados is None:
-        return jsonify({'erro': 'Lote não encontrado.'}), 404
-    return jsonify(dados), 200
-
-
-# ─── API: lista de lotes (histórico paginado) ─────────────────────────────────
-
-@app.route('/api/rh/pedcom/lotes', methods=['GET'])
-@acesso_relatorio_requerido('rh', 'pedcom')
-def api_rh_pedcom_listar_lotes():
-    """Lista os lotes mais recentes, paginado, para a página de histórico."""
-    try:
-        pagina     = max(1, int(request.args.get('pagina', 1)))
-        por_pagina = min(50, max(1, int(request.args.get('por_pagina', 20))))
-    except (ValueError, TypeError):
-        pagina, por_pagina = 1, 20
-
-    return jsonify(pedcom_listar_lotes(pagina, por_pagina)), 200
 
 
 # ─── Bootstrap por worker ────────────────────────────────────────────────────

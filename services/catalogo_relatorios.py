@@ -28,6 +28,14 @@ RELATORIOS_CATALOGO = [
                 'api_base': '/api/relatorios/compras/pendencia-aprovacao',
                 'ativo': True,
             },
+            {
+                'id': 'pedidos_detalhado',
+                'titulo': 'Pedidos de Compra Detalhado',
+                'descricao': 'Pedidos de compra com Centro de Custo, Item Orçamentário, Conta Contábil e Condição de Pagamento.',
+                'path': '/relatorios/compras/pedidos-detalhado',
+                'api_base': '/api/relatorios/compras/pedidos-detalhado',
+                'ativo': True,
+            },
         ],
     },
     {
@@ -89,22 +97,6 @@ RELATORIOS_CATALOGO = [
                 'path': '/relatorios/financeiro/mov-bancarios',
                 'api_base': '/api/relatorios/financeiro/mov-bancarios',
                 'ativo': True,
-            },
-        ],
-    },
-    {
-        'id': 'rh',
-        'titulo': 'RH',
-        'descricao': 'Operações do setor de Recursos Humanos: criação de pedidos de compra PJ.',
-        'relatorios': [
-            {
-                'id': 'pedcom',
-                'titulo': 'Pedidos de Compra PJ',
-                'descricao': 'Criação em massa de pedidos de compra para colaboradores PJ via planilha.',
-                'path': '/rh/pedcom',
-                'api_base': '/api/rh/pedcom',
-                'ativo': True,
-                'admin_only': False,
             },
         ],
     },
