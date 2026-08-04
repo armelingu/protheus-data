@@ -2,13 +2,13 @@
 
 > Documento de referência para LLMs e agentes. Descreve a arquitetura completa,
 > convenções de código, rotas, banco de dados, serviços e estado atual do projeto.
-> **Atualizado em:** Mai/2026
+> **Atualizado em:** Ago/2026
 
 ---
 
 ## 1. Visão geral
 
-**ProtheusData** é um portal web interno que **replica dados do ERP Protheus (SQL Server) em um banco SQLite local** e os expõe via:
+**ProtheusData** é um portal web interno que **replica dados do ERP Protheus (SQL Server) em bancos SQLite locais** e os expõe via:
 
 - Interface web com autenticação por sessão (Flask + Jinja2)
 - API RESTful para operações de sync e download
@@ -31,11 +31,11 @@ O ERP Protheus é da TOTVS, rodando em SQL Server 2019. O sistema lê o banco do
 | Banco cache (local) | SQLite 3 (WAL mode, 3 arquivos) |
 | Banco fonte (ERP) | Microsoft SQL Server 2019 (Protheus P12_PRD) |
 | Driver SQL Server | ODBC Driver 17 for SQL Server (via pyodbc 5.3) |
-| Cache de permissões | Redis (opcional; fallback em memória se indisponível) |
+| E-mail | Microsoft Graph API (OAuth2 client_credentials) |
 | Exportação | openpyxl 3.1 (XLSX) |
 | Compressão HTTP | Flask-Compress |
-| Container | Docker + Docker Compose |
-| Frontend (atual) | Jinja2 templates + CSS/JS vanilla |
+| Container | Docker + Docker Compose (2 serviços: `web` + `etl`) |
+| Frontend | Jinja2 templates + CSS/JS vanilla |
 | Frontend (mockup futuro) | React 18 + Material UI v9 + Vite 5 (pasta `mockup/`) |
 
 ---
@@ -44,58 +44,75 @@ O ERP Protheus é da TOTVS, rodando em SQL Server 2019. O sistema lê o banco do
 
 ```
 orders_consult/
-├── app.py                        # Aplicação Flask monolítica (~4100 linhas)
+├── app.py                        # Aplicação Flask monolítica (~4600 linhas)
 ├── requirements.txt              # Dependências Python
 ├── Dockerfile                    # Imagem python:3.11-slim + ODBC Driver 17
-├── docker-compose.yml            # Produção: porta 5005→5000, volume ./data
+├── docker-compose.yml            # 2 serviços: web (porta 5005) + etl
 ├── deploy.sh                     # Script de deploy
 ├── .env                          # Variáveis de ambiente (NÃO comitar)
 ├── .env.example                  # Template documentado de todas as variáveis
 ├── .gitignore
 │
 ├── config/
-│   └── gunicorn_conf.py          # 2 workers × 4 threads; scheduler no worker 0
+│   └── gunicorn_conf.py          # 2 workers × 4 threads; sem scheduler (delegado ao ETL)
+│
+├── etl/                          # Processo ETL dedicado (roda em container separado)
+│   ├── __init__.py
+│   └── worker.py                 # Scheduler: full refresh diário 02:00 + sync horário 08-18h
 │
 ├── services/
 │   ├── database.py               # Conexões SQLite, schemas, backup, pragmas WAL
 │   ├── protheus_readonly.py      # Conexão pyodbc ao SQL Server; retry; validação SELECT
+│   ├── sync_engine.py            # Engine de full refresh baseado em hash MD5
 │   ├── catalogo_relatorios.py    # Catálogo de módulos/relatórios e permissões
 │   ├── cache.py                  # Cache Redis opcional (permissões de usuário)
-│   ├── email_service.py          # Envio de e-mail via SMTP (Gmail)
+│   ├── email_service.py          # Envio de e-mail via Microsoft Graph API (OAuth2)
 │   ├── time_utils.py             # Timezone America/Sao_Paulo, helpers de data
-│   └── relatorios/               # Queries SQL por módulo
-│       ├── compras/              # pedidos.py, historico.py
-│       ├── estoque/              # saldos.py
-│       ├── financeiro/           # nf_entrada.py, nf_saida.py, contas_receber.py,
-│       │                         #   contas_pagar.py, mov_bancarios.py
-│       └── energy/               # contas_pagar.py, pedidos.py
+│   └── relatorios/               # Queries SQL + lógica de sync por módulo
+│       ├── compras/
+│       │   ├── pedidos.py                  # Pedidos de Compra
+│       │   ├── pedidos_detalhado.py        # Pedidos de Compra Detalhado (CC, conta, cond. pgto)
+│       │   ├── historico_pedidos.py        # Histórico de Pedidos
+│       │   └── pendencia_aprovacao.py      # Pendência de Aprovação
+│       ├── estoque/
+│       │   └── saldos.py                   # Saldo em Estoque
+│       ├── financeiro/
+│       │   ├── base.py                     # Engine compartilhada (keyset pagination, sync window)
+│       │   ├── nf_entrada.py
+│       │   ├── nf_saida.py
+│       │   ├── contas_receber.py
+│       │   ├── contas_pagar.py
+│       │   └── mov_bancarios.py
+│       └── energy/
+│           ├── pedidos.py                  # Pedidos Energy (filtro por comprador + item 05.001)
+│           ├── pedidos_conta_05001.py      # Pedidos Conta 05.001 (todos os compradores)
+│           └── contas_pagar.py
 │
 ├── templates/                    # Jinja2 (herdam de base_auth.html)
 │   ├── base_auth.html
-│   ├── login/, auth/, perfil/
+│   ├── login/, auth/, perfil/, gerente/
 │   ├── admin/                    # usuarios.html, setores.html, auditoria.html
-│   ├── gerente/
 │   └── relatorios/               # 1 template por relatório
 │
 ├── statics/
-│   ├── css/                      # CSS vanilla por seção (admin, auth, financeiro, etc.)
+│   ├── css/                      # CSS vanilla por seção
 │   └── js/                       # JS vanilla por seção
 │
 ├── scripts/
 │   └── criar_usuario.py          # Script CLI para criar usuário admin inicial
 │
 ├── docs/
-│   ├── ISSUES.md                 # Issues de CSS/frontend identificadas em Mai/2026
-│   └── DESIGN_SYSTEM.md          # Tokens e guia de estilo atual
+│   ├── ISSUES.md                 # Issues de CSS/frontend
+│   └── DESIGN_SYSTEM.md          # Tokens e guia de estilo
 │
 ├── data/                         # Volume Docker (NÃO comitar — gerado em runtime)
 │   ├── users.db                  # Usuários, sessões, permissões, logs de acesso
-│   ├── pedidos.db                # Cache: pedidos de compra + estoque + energy pedidos
+│   ├── pedidos.db                # Cache: pedidos de compra + estoque + energy
 │   ├── financeiro.db             # Cache: NF, títulos, movimentos bancários
 │   └── backups/                  # Backups automáticos diários dos .db
 │
 ├── homolog/                      # Ambiente de homologação independente
-│   ├── docker-compose.yml        # Porta 5005→5000
+│   ├── docker-compose.yml
 │   ├── .env
 │   └── data/
 │
@@ -103,11 +120,10 @@ orders_consult/
     ├── src/
     │   ├── App.jsx
     │   ├── theme.js              # Tema MUI customizado (paleta HBR)
-    │   ├── components/           # Layout, Sidebar, Topbar, StatusChip
-    │   └── pages/                # Dashboard, ContasReceber, ContasPagar,
-    │                             #   MovBancarios, Energy, Placeholder
-    ├── start-mockup.sh           # Inicia dev server na porta 8888
-    └── package.json              # React 18, MUI v9, Vite 5
+    │   ├── components/
+    │   └── pages/
+    ├── start-mockup.sh
+    └── package.json
 ```
 
 ---
@@ -137,43 +153,92 @@ PRAGMA busy_timeout=5000;    -- 5s antes de SQLITE_BUSY
 | `logs_acesso` | Auditoria de login/logout/ações |
 | `auditoria_admin` | Ações administrativas de usuários admin/gerente |
 | `rate_limit` | IPs com tentativas de login suspeitas |
-| `sync_status` | Estado do último sync por módulo (usado pelo scheduler) |
 | `logs_email` | Histórico de e-mails enviados pelo sistema |
 
-### 4.2 `pedidos.db` — Compras e estoque
+### 4.2 `pedidos.db` — Compras, Estoque e Energy
 
-| Tabela | Tabela Protheus origem |
-|---|---|
-| `pedidos` | SC7 (Pedidos de Compra) |
-| `historico_pedidos` | SC7 (visão histórica sem filtro de comprador) |
-| `estoque_saldos` | SB2 (Saldo em Estoque) |
-| `energy_pedidos` | SC7 filtrado por compradores Energy |
+| Tabela | Tabela Protheus | Estratégia sync |
+|---|---|---|
+| `pedidos` | SC7 (Pedidos de Compra) | Hash MD5 (full_refresh_com_hash) |
+| `pedidos_detalhado` | SC7 + CTT/CTD/CT1/SE4 (com CC, conta, cond. pgto) | Hash MD5 |
+| `pedidos_historico` | SC7 (visão histórica, sem filtro de comprador) | Hash MD5 |
+| `pendencia_aprovacao` | SC7 + SCR (nível de aprovação) | Hash MD5 |
+| `pedidos_energy` | SC7 filtrado por compradores Energy + item 05.001 | Hash MD5 |
+| `pedidos_conta_05001` | SC7 filtrado por C7_ITEMCTA = '05.001' (todos compradores) | Hash MD5 |
+| `estoque_saldos` | SB2 (Saldo em Estoque) | Hash MD5 |
+| `_etl_hash_cache` | — | Cache interno de hashes MD5 por tabela (usado pelo sync_engine) |
+| `*_sync_log` | — | Log de execuções de sync por módulo |
 
 ### 4.3 `financeiro.db` — Financeiro
 
-| Tabela | Tabela Protheus origem |
-|---|---|
-| `nf_entrada` | SD1 (Itens NF Entrada) |
-| `nf_saida` | SD2 (Itens NF Saída) |
-| `contas_receber` | SE1 (Títulos a Receber) |
-| `contas_pagar` | SE2 (Títulos a Pagar) |
-| `mov_bancarios` | SE5 (Movimentos Bancários) |
-| `energy_contas_pagar` | SE2 filtrado por E2_ITEMD = '05.001' |
+| Tabela | Tabela Protheus | Estratégia sync |
+|---|---|---|
+| `nf_entrada_itens` | SD1 (Itens NF Entrada) | Keyset pagination (R_E_C_N_O_) |
+| `nf_saida_itens` | SD2 (Itens NF Saída) | Keyset pagination |
+| `contas_receber` | SE1 (Títulos a Receber) | Keyset pagination |
+| `contas_pagar` | SE2 (Títulos a Pagar) | Keyset pagination |
+| `mov_bancarios` | SE5 (Movimentos Bancários) | Keyset pagination |
+| `energy_contas_pagar` | SE2 filtrado por E2_ITEMD = '05.001' | Keyset pagination |
+| `sync_cursor` | — | Último R_E_C_N_O_ processado por tabela |
+| `*_sync_log` | — | Log de execuções de sync por módulo |
 
 ---
 
-## 5. Mecanismo de sincronização (Sync)
+## 5. Arquitetura ETL
 
-O sync é executado **a cada hora** por um `threading.Timer` gerenciado pelo **SCHEDULER_OWNER** (primeiro worker do Gunicorn).
+### 5.1 Visão geral
 
-### Fluxo
+O sistema usa **dois containers independentes** para separar o servidor web do processamento ETL:
 
-1. `inicializar()` → chamado no `post_fork` do worker 0
-2. Executa `rotina_sync()` imediatamente (carga inicial)
-3. Agenda `rotina_sync()` novamente para a próxima hora cheia
-4. A cada ciclo: para cada módulo, executa o `SELECT` no Protheus, faz `upsert` no SQLite local
+```
+┌──────────────────────┐       SQLite WAL        ┌──────────────────────┐
+│   Container: web     │ ←───── shared volume ──→ │   Container: etl     │
+│   Flask + Gunicorn   │       ./data/*.db         │   etl/worker.py      │
+│   Serve relatórios   │                           │   Scheduler + sync   │
+└──────────────────────┘                           └──────────────────────┘
+        ↑                                                    ↓
+   Leitura SQLite                                   Escrita Protheus → SQLite
+```
 
-### Janelas de lookback (quanto retroativo o sync reprocessa)
+O SQLite com **WAL mode** permite leituras concorrentes enquanto o ETL escreve — usuários não percebem impacto durante o sync.
+
+### 5.2 Agenda do ETL worker
+
+| Horário | Job | Descrição |
+|---|---|---|
+| **startup** | Carga inicial | `carga_inicial()` para qualquer tabela vazia (no-op se já populada) |
+| **02:00** (diário) | Full refresh | Recarrega **todos** os 13 relatórios do Protheus |
+| **08:00–18:00** (horas cheias) | Sync incremental | Janela de lookback para cada módulo |
+
+Horário do full refresh configurável via `ETL_FULL_REFRESH_HORA` (padrão: `2`).
+
+### 5.3 Estratégias de sincronização
+
+#### Hash MD5 — `services/sync_engine.py` (pedidos, estoque)
+
+Usado pelos 7 módulos que têm chave única clara (pedidos/estoque):
+
+```
+Protheus → normaliza linha → calcula MD5 → compara com _etl_hash_cache
+  → hash igual   : ignora (zero escrita no SQLite)
+  → hash diferente: upsert apenas essa linha
+  → linha sumiu  : delete real (orphan eliminado)
+```
+
+**Vantagens:**
+- Escreve somente o que mudou → lock de escrita mínimo
+- Detecta deletions reais (sem dependência de lookback)
+- Idempotente e atômico
+
+#### Keyset pagination — `services/relatorios/financeiro/base.py` (financeiro)
+
+Usado pelos 6 módulos financeiros que não têm chave única simples e têm volume alto (100k–135k registros):
+
+- **Carga inicial**: itera por `R_E_C_N_O_` em batches de 5.000 registros
+- **Sync incremental**: date-window (`max_data_local - lookback_dias`)
+- **Full refresh**: `DELETE FROM tabela` + `DELETE FROM sync_cursor` + reexecuta carga inicial
+
+### 5.4 Janelas de lookback (sync incremental)
 
 | Variável `.env` | Módulo | Padrão |
 |---|---|---|
@@ -186,6 +251,25 @@ O sync é executado **a cada hora** por um `threading.Timer` gerenciado pelo **S
 
 > **Por que 365 dias nos títulos?** Títulos vencidos há meses podem ser baixados a qualquer momento. Um lookback curto faria o sync ignorar essas baixas, deixando saldos desatualizados.
 
+### 5.5 Adicionar um novo módulo de relatório
+
+Para criar um novo módulo que usa hash-based full refresh:
+
+1. Criar `services/relatorios/<modulo>/<nome>.py` com:
+   - `QUERY_COMPLETA` — SQL que retorna todos os registros
+   - `INSERT_*` — UPSERT SQL com `ON CONFLICT DO UPDATE`
+   - `_norm(v)` — normalizador de valor
+   - `registrar_sync_event(...)` — logger de sync
+   - `carga_completa()` chamando `full_refresh_com_hash()`
+   - `carga_inicial()` — no-op se tabela populada
+   - `sincronizar()` — sync incremental (date-window)
+
+2. Registrar no `services/catalogo_relatorios.py`
+
+3. Adicionar imports e rota em `app.py`
+
+4. Adicionar ao `etl/worker.py` (`_JOBS_HASH` e `_JOBS_SYNC_INCREMENTAL`)
+
 ---
 
 ## 6. Conexão com o Protheus
@@ -195,15 +279,15 @@ O sync é executado **a cada hora** por um `threading.Timer` gerenciado pelo **S
 - Driver: `ODBC Driver 17 for SQL Server`
 - Modo: `ApplicationIntent=ReadOnly`, `READ UNCOMMITTED`
 - `TrustServerCertificate=yes` (contorna problemas de certificado na rede interna)
-- Validação de query: só aceita `SELECT`, bloqueia palavras como `INSERT`, `UPDATE`, `DELETE`, `DROP`, etc.
-- Retry automático em erros transientes (rede, timeout): até `PROTHEUS_MAX_RETRIES` tentativas com backoff linear de 5s
+- Validação de query: só aceita `SELECT`; bloqueia `INSERT`, `UPDATE`, `DELETE`, `DROP`, etc.
+- Retry automático em erros transientes: até `PROTHEUS_MAX_RETRIES` tentativas com backoff linear de 5s
 
 **Timeouts:**
 
 | Variável | Significado | Padrão |
 |---|---|---|
-| `PROTHEUS_CONNECT_TIMEOUT` | Tempo para estabelecer conexão TCP + login | 10s (prod: 30s) |
-| `PROTHEUS_QUERY_TIMEOUT` | Tempo máximo de execução de cada SELECT | 60s |
+| `PROTHEUS_CONNECT_TIMEOUT` | Tempo para estabelecer conexão TCP + login | 30s |
+| `PROTHEUS_QUERY_TIMEOUT` | Tempo máximo de execução de cada SELECT | 60s (ETL: 120s) |
 | `PROTHEUS_MAX_RETRIES` | Tentativas em erro transiente | 2 |
 
 ---
@@ -234,7 +318,7 @@ O sync é executado **a cada hora** por um `threading.Timer` gerenciado pelo **S
 
 - Rate limit por IP em `/api/login` (bloqueio progressivo)
 - CSRF token em todos os formulários/POSTs
-- Sessão com `SESSION_LIFETIME_SECONDS` (padrão: 8h)
+- Sessão com `SESSION_LIFETIME_SECONDS` (padrão: 7 dias)
 - `SESSION_COOKIE_SECURE=true` em produção HTTPS
 
 ---
@@ -255,7 +339,9 @@ O sync é executado **a cada hora** por um `threading.Timer` gerenciado pelo **S
 | `/admin/auditoria` | Admin | Logs de auditoria |
 | `/gerente` | Gerente | Usuários do setor |
 | `/relatorios/compras/pedidos` | Perm. | Pedidos de Compra |
+| `/relatorios/compras/pedidos-detalhado` | Perm. | Pedidos de Compra Detalhado |
 | `/relatorios/compras/historico` | Perm. | Histórico de Pedidos |
+| `/relatorios/compras/pendencia-aprovacao` | Perm. | Pendência de Aprovação |
 | `/relatorios/estoque/saldos` | Perm. | Saldo em Estoque |
 | `/relatorios/financeiro/nf-entrada` | Perm. | NF de Entrada |
 | `/relatorios/financeiro/nf-saida` | Perm. | NF de Saída |
@@ -264,6 +350,7 @@ O sync é executado **a cada hora** por um `threading.Timer` gerenciado pelo **S
 | `/relatorios/financeiro/mov-bancarios` | Perm. | Movimentos Bancários |
 | `/relatorios/energy/contas-pagar` | Perm. | Energy — Contas a Pagar |
 | `/relatorios/energy/pedidos` | Perm. | Energy — Pedidos de Compra |
+| `/relatorios/energy/pedidos-conta-05001` | Perm. | Energy — Pedidos Conta 05.001 |
 
 ### API REST (JSON)
 
@@ -273,7 +360,7 @@ Cada relatório tem 4 endpoints no padrão `/api/relatorios/<modulo>/<id>/`:
 |---|---|---|
 | `/info` | GET | Metadados: total de registros, último sync, status |
 | `/historico-sync` | GET | Últimos N syncs do módulo |
-| `/sync` | POST | Dispara sync manual imediato |
+| `/sync` | POST | Dispara sync incremental manual imediato |
 | `/download` | GET | Retorna arquivo XLSX |
 
 **Outros endpoints relevantes:**
@@ -291,6 +378,7 @@ Cada relatório tem 4 endpoints no padrão `/api/relatorios/<modulo>/<id>/`:
 | `/api/admin/usuarios/<id>/reset-senha` | POST | Forçar reset de senha |
 | `/api/admin/setores` | GET/POST/DELETE | CRUD setores |
 | `/api/admin/setores/<id>/configuracao` | POST | Permissões do setor |
+| `/api/admin/full-refresh` | POST | Dispara full refresh manual (body: `{"relatorio": "todos"}`) |
 | `/api/admin/logs` | GET | Logs de acesso paginados |
 | `/api/gerente/usuarios` | GET | Usuários do setor (gerente) |
 | `/health` | GET | Health check (Docker) |
@@ -302,8 +390,10 @@ Requer header `Authorization: Bearer <api_token>`.
 | Endpoint | Tabela |
 |---|---|
 | `/odata/pedidos` | Pedidos de Compra |
+| `/odata/pedidos-detalhado` | Pedidos de Compra Detalhado |
 | `/odata/energy-pedidos` | Energy — Pedidos |
 | `/odata/historico-pedidos` | Histórico de Pedidos |
+| `/odata/pendencia-aprovacao` | Pendência de Aprovação |
 | `/odata/estoque` | Saldo em Estoque |
 | `/odata/nf-entrada` | NF de Entrada |
 | `/odata/nf-saida` | NF de Saída |
@@ -328,57 +418,75 @@ DB_PASSWORD=<senha>
 
 # Flask
 SECRET_KEY=<hex-32-bytes>
-SESSION_LIFETIME_SECONDS=28800
-SESSION_COOKIE_SECURE=false        # true em HTTPS
-TRUST_PROXY_HEADERS=false          # true se houver Nginx na frente
+SESSION_LIFETIME_SECONDS=604800     # 7 dias
+SESSION_COOKIE_SECURE=false         # true em HTTPS
+TRUST_PROXY_HEADERS=false           # true se houver Nginx na frente
 
 # Timeouts Protheus
-PROTHEUS_CONNECT_TIMEOUT=10
+PROTHEUS_CONNECT_TIMEOUT=30
 PROTHEUS_QUERY_TIMEOUT=60
 PROTHEUS_MAX_RETRIES=2
 
-# Janelas de sync por módulo (dias retroativos)
-SYNC_LOOKBACK_TITULOS=365          # Crítico — não reduzir
+# Janelas de sync incremental por módulo (dias retroativos)
+SYNC_LOOKBACK_TITULOS=365           # Crítico — não reduzir
 SYNC_LOOKBACK_PEDIDOS=60
 SYNC_LOOKBACK_HISTORICO=30
 SYNC_LOOKBACK_NF=30
 SYNC_LOOKBACK_MOV_BANCARIOS=30
+SYNC_LOOKBACK_DAYS=30               # Fallback global
 
-# E-mail (Gmail SMTP)
+# E-mail — Microsoft Graph API (OAuth2 client_credentials)
 EMAIL_ENABLED=true
-EMAIL_PROVIDER=gmail
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USERNAME=<gmail>
-SMTP_PASSWORD=<app-password>
+EMAIL_PROVIDER=msgraph
+EMAIL_FROM=totvs@hbraviacao.com.br
+MS_TENANT_ID=<guid-do-tenant>
+MS_CLIENT_ID=<guid-do-app-no-entra>
+MS_CLIENT_SECRET=<segredo-do-app>
+
+# URL base para links nos e-mails
+APP_BASE_URL=http://10.0.253.100:5005
+
+# ETL — Agendamento e alertas
+ETL_FULL_REFRESH_HORA=2             # Hora do full refresh diário (0–23)
+ETL_ALERT_EMAILS=ti@hbraviacao.com.br  # Destinatários de alertas de sucesso/falha (CSV)
 ```
 
 ---
 
 ## 10. Docker e deploy
 
+### Serviços
+
+O `docker-compose.yml` define **dois serviços** que compartilham o volume `./data`:
+
+| Serviço | Container | Função |
+|---|---|---|
+| `web` | `orders_consult` | Servidor Flask (Gunicorn) — porta 5005 |
+| `etl` | `orders_consult_etl` | ETL worker — sync + full refresh agendados |
+
 ### Build e subida (produção)
 
 ```bash
 cd /home/hbradmin/orders_consult
-docker compose up -d --build
+
+# Primeira vez ou após mudanças no código/dependências:
+docker compose build --no-cache && docker compose up -d
+
+# Rebuild só do ETL (mais rápido, não derruba o web):
+docker compose build etl && docker compose up -d etl
+
+# Reiniciar sem rebuild:
+docker compose restart
 ```
 
-### Estrutura do container
+### Estrutura dos containers
 
 - Imagem base: `python:3.11-slim`
 - ODBC Driver 17 instalado via APT (Microsoft repo)
-- Gunicorn: 2 workers gthread × 4 threads, bind `0.0.0.0:5000`
-- Porta host: `5005` → container `5000`
-- Volume: `./data:/app/data` (bancos SQLite persistentes)
-- Health check: `GET /health` a cada 60s
-
-### Gunicorn — estratégia de workers
-
-- `SCHEDULER_OWNER` = primeiro worker forkado (`worker.age == 0`)
-- Apenas ele roda `inicializar()` (carga inicial + agendamento do sync horário)
-- Os demais workers só executam `garantir_schemas()` (idempotente)
-- `preload_app=True` economiza RAM via copy-on-write
+- **web**: Gunicorn 2 workers gthread × 4 threads, bind `0.0.0.0:5000`
+- **etl**: `python3 -u etl/worker.py` (processo standalone, sem Gunicorn)
+- Volume compartilhado: `./data:/app/data` (bancos SQLite persistentes)
+- Health check (web): `GET /health` a cada 60s
 
 ### Criar usuário admin inicial
 
@@ -386,64 +494,93 @@ docker compose up -d --build
 docker exec -it orders_consult python scripts/criar_usuario.py
 ```
 
+### Forçar full refresh manual
+
+```bash
+docker exec orders_consult_etl python3 -c "
+import sys; sys.path.insert(0, '/app')
+from dotenv import load_dotenv; load_dotenv()
+from etl.worker import executar_full_refresh
+executar_full_refresh()
+"
+```
+
+Ou via API (requer cookie de sessão admin):
+```bash
+curl -X POST http://localhost:5005/api/admin/full-refresh \
+  -H "Content-Type: application/json" \
+  -H "Cookie: session=..." \
+  -H "X-CSRF-Token: ..." \
+  -d '{"relatorio": "todos"}'
+```
+
 ---
 
-## 11. Módulos de relatório — resumo
+## 11. Módulos de relatório
 
 | Chave | Módulo | Relatório | Tabela Protheus | Tabela SQLite |
 |---|---|---|---|---|
 | `compras.pedidos` | Compras | Pedidos de Compra | SC7 | `pedidos` |
-| `compras.historico` | Compras | Histórico de Pedidos | SC7 | `historico_pedidos` |
+| `compras.pedidos_detalhado` | Compras | Pedidos de Compra Detalhado | SC7+CTT+CTD+CT1+SE4 | `pedidos_detalhado` |
+| `compras.historico` | Compras | Histórico de Pedidos | SC7 | `pedidos_historico` |
+| `compras.pendencia_aprovacao` | Compras | Pendência de Aprovação | SC7+SCR | `pendencia_aprovacao` |
 | `estoque.saldos` | Estoque | Saldo em Estoque | SB2 | `estoque_saldos` |
-| `financeiro.nf_entrada` | Financeiro | NF de Entrada | SD1 | `nf_entrada` |
-| `financeiro.nf_saida` | Financeiro | NF de Saída | SD2 | `nf_saida` |
+| `financeiro.nf_entrada` | Financeiro | NF de Entrada | SD1 | `nf_entrada_itens` |
+| `financeiro.nf_saida` | Financeiro | NF de Saída | SD2 | `nf_saida_itens` |
 | `financeiro.contas_receber` | Financeiro | Contas a Receber | SE1 | `contas_receber` |
 | `financeiro.contas_pagar` | Financeiro | Contas a Pagar | SE2 | `contas_pagar` |
 | `financeiro.mov_bancarios` | Financeiro | Mov. Bancários | SE5 | `mov_bancarios` |
 | `energy.contas_pagar` | Energy | Contas a Pagar | SE2 (E2_ITEMD=05.001) | `energy_contas_pagar` |
-| `energy.pedidos` | Energy | Pedidos de Compra | SC7 (compradores Energy) | `energy_pedidos` |
+| `energy.pedidos` | Energy | Pedidos de Compra | SC7 (compradores Energy) | `pedidos_energy` |
+| `energy.pedidos_conta_05001` | Energy | Pedidos Conta 05.001 | SC7 (todos compradores, item 05.001) | `pedidos_conta_05001` |
+
+### Colunas extras em `pedidos_detalhado`
+
+Além de todas as colunas de `pedidos`, esse relatório inclui:
+
+| Coluna | Tabela Protheus | Descrição |
+|---|---|---|
+| `centro_custo` / `centro_custo_desc` | CTT010 (chave: C7_CC) | Centro de Custo e descrição |
+| `item_conta` / `item_conta_desc` | CTD010 (chave: C7_ITEMCTA) | Item Orçamentário e descrição |
+| `conta_contabil` / `conta_contabil_desc` | CT1010 (chave: C7_CONTA) | Conta Contábil e descrição |
+| `cond_pagamento` / `cond_pagamento_desc` | SE4010 (chave: C7_COND) | Condição de Pagamento e descrição |
+
+> As tabelas auxiliares são consultadas via `OUTER APPLY (SELECT TOP 1 ...)` para evitar multiplicação de linhas causada pela separação por filial no Protheus.
 
 ---
 
-## 12. Issues conhecidas (CSS/Frontend)
+## 12. E-mail — Microsoft Graph API
 
-Levantadas em 25/05/2026. Ver `docs/ISSUES.md` para detalhes completos.
+O sistema envia e-mails via **Microsoft Graph API** usando OAuth2 `client_credentials` (sem MFA, sem interação do usuário).
 
-| # | Prioridade | Problema | Arquivo |
-|---|---|---|---|
-| C1 | Crítico | ~200 linhas de CSS inline no template de Perfil | `templates/perfil/index.html` |
-| C2 | Crítico | Fonte externa Google Fonts (falha em rede interna) | `statics/css/login/login.css` |
-| M1 | Moderado | Sem variáveis CSS — valores hardcoded em 6 arquivos | `statics/css/**` |
-| M2 | Moderado | Classe `.kicker` com 3 nomes diferentes | `consulta.css`, `admin.css`, `home.css` |
-| M3 | Moderado | Breakpoints inconsistentes entre arquivos | vários |
-| L1 | Baixo | `@keyframes fadeIn` declarado 3 vezes | vários |
-| L2 | Baixo | `max-width` de conteúdo inconsistente (930px vs 980px) | vários |
-| L3 | Baixo | `border-radius:0` por componente em vez de no reset | vários |
+**Configuração necessária no Microsoft Entra (Azure AD):**
+1. Criar um **Registro de Aplicativo** no Entra
+2. Tipo de conta: *Somente minha organização*
+3. Permissão de **aplicativo** (não delegada): `Mail.Send`
+4. Conceder **consentimento de administrador** para a permissão
+5. Criar um **segredo do cliente** e preencher `MS_CLIENT_SECRET` no `.env`
+
+**E-mails enviados pelo sistema:**
+- Boas-vindas / primeiro acesso do usuário
+- Reset de senha solicitado por admin
+- **ETL full refresh concluído** (tabela com resumo por módulo)
+- **ETL full refresh com falha** (lista de módulos que falharam)
 
 ---
 
-## 13. Mockup de redesign (referência futura)
+## 13. Alertas do ETL
 
-Pasta `mockup/` contém um protótipo completo em **React 18 + Material UI v9**
-que representa a direção visual futura do sistema.
+Quando configurado `ETL_ALERT_EMAILS`, o ETL worker envia e-mail após cada full refresh:
 
-**Como iniciar:**
+| Situação | Assunto | Conteúdo |
+|---|---|---|
+| **Sucesso** | `[ProtheusData] ETL — Full refresh concluído (DD/MM às HH:MM)` | Tabela com módulo + registros/mutações + duração |
+| **Com erros** | `[ProtheusData] ETL — Falha no full refresh (DD/MM às HH:MM)` | Lista dos módulos que falharam + instrução de diagnóstico |
 
-```bash
-cd mockup
-./start-mockup.sh        # porta 8888
-# ou o mockup estático (HTML puro, sem build):
-python3 -m http.server 8888 --bind 0.0.0.0
-# acesso: http://10.0.253.100:8888/mockup_reformulacao.html
+Para múltiplos destinatários, separar por vírgula:
 ```
-
-**Seções implementadas no mockup React:**
-- Dashboard com KPIs, gráfico de barras e donut
-- Contas a Receber (tabela + filtros + paginação)
-- Contas a Pagar (com alertas de vencimento)
-- Movimentos Bancários (timeline agrupada por data)
-- Energy — Contas a Pagar (hero escuro + tabela + barras de progresso)
-- Placeholders: Pedidos, NF, Estoque, Admin
+ETL_ALERT_EMAILS=ti@hbraviacao.com.br,gerencia@hbraviacao.com.br
+```
 
 ---
 
@@ -455,7 +592,8 @@ python3 -m http.server 8888 --bind 0.0.0.0
 - Decorators de proteção: `@login_requerido`, `@admin_requerido`, `@gerente_requerido`, `@acesso_relatorio_requerido(modulo_id, relatorio_id)`
 - Todos os retornos de API usam `jsonify({})` com campo `ok: bool`
 - Queries SQL no Protheus ficam nos arquivos dentro de `services/relatorios/`
-- **Nunca** executar INSERT/UPDATE/DELETE no Protheus — a função `validar_query_somente_leitura()` bloqueia automaticamente
+- **Nunca** executar INSERT/UPDATE/DELETE no Protheus — `validar_query_somente_leitura()` bloqueia automaticamente
+- Novos módulos de relatório devem exportar `carga_completa()` usando `sync_engine.full_refresh_com_hash()`
 
 ### Templates Jinja2
 
@@ -463,11 +601,12 @@ python3 -m http.server 8888 --bind 0.0.0.0
 - Bloco `{% block conteudo %}` para o conteúdo de cada página
 - Bloco `{% block scripts %}` para JS específico da página
 
-### CSS/JS vanilla (estado atual)
+### CSS/JS vanilla
 
 - CSS por seção em `statics/css/<seção>/`
 - JS por seção em `statics/js/<seção>/`
 - Sem bundler; arquivos referenciados diretamente nos templates
+- `border-radius: 0` como padrão de design (flat, monochromatic)
 
 ---
 
@@ -477,7 +616,9 @@ python3 -m http.server 8888 --bind 0.0.0.0
 |---|---|
 | `services/protheus_readonly.py` | Qualquer mudança pode afetar TODOS os syncs |
 | `services/database.py` — funções de schema | Mudança em schema exige migração do SQLite existente |
+| `services/sync_engine.py` | Afeta o full refresh de 7 módulos simultaneamente |
 | `config/gunicorn_conf.py` | Erros aqui impedem o boot do container |
+| `etl/worker.py` — scheduler_loop | Lógica de agendamento crítica |
 | `.env` | Contém credenciais de produção |
 | `data/*.db` | Bancos de produção — nunca editar manualmente |
 
@@ -487,26 +628,49 @@ python3 -m http.server 8888 --bind 0.0.0.0
 
 ```bash
 # Ver logs em tempo real
-docker logs -f orders_consult
+docker compose logs -f web
+docker compose logs -f etl
 
-# Entrar no container
+# Entrar no container web
 docker exec -it orders_consult bash
 
 # Reiniciar sem rebuild
 docker compose restart
 
-# Rebuild completo
-docker compose up -d --build
+# Rebuild completo (ambos os containers)
+docker compose build --no-cache && docker compose up -d
+
+# Rebuild só do ETL (web continua no ar)
+docker compose build etl && docker compose up -d etl
 
 # Verificar saúde
 curl http://localhost:5005/health
 
-# Testar sync manual via API (requer cookie de sessão admin)
-curl -X POST http://localhost:5005/api/relatorios/financeiro/contas-receber/sync \
-  -H "Cookie: session=..." \
-  -H "X-CSRF-Token: ..."
+# Ver status dos containers
+docker compose ps
+
+# Forçar full refresh agora
+docker exec orders_consult_etl python3 -c "
+import sys; sys.path.insert(0, '/app')
+from dotenv import load_dotenv; load_dotenv()
+from etl.worker import executar_full_refresh
+executar_full_refresh()
+"
 
 # Ver bancos SQLite
+sqlite3 data/pedidos.db ".tables"
 sqlite3 data/financeiro.db ".tables"
 sqlite3 data/users.db "SELECT login, perfil, ativo FROM usuarios;"
+
+# Contar registros por tabela (pedidos.db)
+sqlite3 data/pedidos.db "
+  SELECT 'pedidos', COUNT(*) FROM pedidos
+  UNION ALL SELECT 'pedidos_detalhado', COUNT(*) FROM pedidos_detalhado
+  UNION ALL SELECT 'estoque_saldos', COUNT(*) FROM estoque_saldos;
+"
+
+# Testar sync manual via API (requer cookie de sessão admin)
+curl -X POST http://localhost:5005/api/relatorios/compras/pedidos/sync \
+  -H "Cookie: session=..." \
+  -H "X-CSRF-Token: ..."
 ```
