@@ -430,6 +430,25 @@ def criar_tabelas():
         'CREATE INDEX IF NOT EXISTS idx_api_token_permissoes_token '
         'ON api_token_permissoes(token_id)'
     )
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS reset_tokens (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            usuario_id  INTEGER NOT NULL,
+            token_hash  TEXT    NOT NULL UNIQUE,
+            criado_em   TEXT    NOT NULL,
+            expira_em   TEXT    NOT NULL,
+            usado_em    TEXT,
+            ip          TEXT
+        )
+    ''')
+    conn.execute(
+        'CREATE INDEX IF NOT EXISTS idx_reset_tokens_hash '
+        'ON reset_tokens(token_hash)'
+    )
+    conn.execute(
+        'CREATE INDEX IF NOT EXISTS idx_reset_tokens_usuario '
+        'ON reset_tokens(usuario_id)'
+    )
     _popular_setores_iniciais(conn)
     _popular_permissoes_iniciais(conn)
     _garantir_admin_inicial(conn)

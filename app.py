@@ -3,6 +3,7 @@ import json
 import re
 import time
 import hmac
+import hashlib
 import secrets
 import threading
 from datetime import timedelta
@@ -137,7 +138,7 @@ from services.relatorios.financeiro.mov_bancarios import (
     sincronizar_mov_bancarios, carga_inicial_mov_bancarios,
     QUERY_PAGINADA as QUERY_MOV_BANCARIOS,
 )
-from services.email_service import montar_email_acesso, enviar_email
+from services.email_service import montar_email_acesso, montar_email_recuperacao_senha, enviar_email
 from services.time_utils import APP_TIMEZONE, agora_sp, parse_db_datetime
 
 load_dotenv()
@@ -160,7 +161,7 @@ app.config['SESSION_COOKIE_NAME'] = 'protheusdata_session'
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['SESSION_COOKIE_SECURE'] = os.getenv('SESSION_COOKIE_SECURE', 'false').lower() == 'true'
-app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(seconds=int(os.getenv('SESSION_LIFETIME_SECONDS', '604800')))  # 7 dias padrão
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(seconds=int(os.getenv('SESSION_LIFETIME_SECONDS', '28800')))  # 8h padrão (turno de trabalho)
 app.config['SESSION_REFRESH_EACH_REQUEST'] = True
 
 # Compressão automática (gzip/deflate/br) negociada via Accept-Encoding.
@@ -185,9 +186,12 @@ except ImportError:
     print('[WARN] flask_compress não instalado — respostas sairão sem gzip.')
 
 
-def _gerar_csrf_token():
-    """Gera e persiste um token CSRF na sessão. Idempotente."""
-    if 'csrf_token' not in session:
+def _gerar_csrf_token(force: bool = False):
+    """Gera e persiste um token CSRF na sessão.
+
+    Idempotente por padrão; use force=True para rotacionar (após login, troca de senha).
+    """
+    if force or 'csrf_token' not in session:
         session['csrf_token'] = secrets.token_hex(32)
         session.modified = True
     return session['csrf_token']
@@ -259,6 +263,15 @@ def _no_cache_em_apis(resp):
         pass
     return resp
 
+
+@app.after_request
+def _headers_seguranca(resp):
+    """Injeta cabeçalhos de segurança HTTP em todas as respostas."""
+    resp.headers.setdefault('X-Frame-Options', 'DENY')
+    resp.headers.setdefault('X-Content-Type-Options', 'nosniff')
+    resp.headers.setdefault('Referrer-Policy', 'same-origin')
+    return resp
+
 SYNC_INTERVALO = 3600
 MAX_TENTATIVAS_LOGIN = 5
 BLOQUEIO_MINUTOS = 5
@@ -298,28 +311,27 @@ def _json_dump(valor):
     return json.dumps(valor, ensure_ascii=True, sort_keys=True)
 
 
-def obter_usuario_por_id(usuario_id):
+def _obter_usuario_por(campo: str, valor) -> object:
+    """Lookup genérico de usuário por qualquer coluna indexada."""
     conn = conectar_users()
     try:
-        return conn.execute('SELECT * FROM usuarios WHERE id = ?', (usuario_id,)).fetchone()
+        return conn.execute(
+            f'SELECT * FROM usuarios WHERE {campo} = ?', (valor,)
+        ).fetchone()
     finally:
         conn.close()
+
+
+def obter_usuario_por_id(usuario_id):
+    return _obter_usuario_por('id', usuario_id)
 
 
 def obter_usuario_por_login(login):
-    conn = conectar_users()
-    try:
-        return conn.execute('SELECT * FROM usuarios WHERE usuario = ?', (login,)).fetchone()
-    finally:
-        conn.close()
+    return _obter_usuario_por('usuario', login)
 
 
 def obter_usuario_por_email(email):
-    conn = conectar_users()
-    try:
-        return conn.execute('SELECT * FROM usuarios WHERE email = ?', (email,)).fetchone()
-    finally:
-        conn.close()
+    return _obter_usuario_por('email', email)
 
 
 def obter_ultimo_email_usuario(usuario_id):
@@ -711,15 +723,17 @@ def login_requerido(f):
     def wrapper(*args, **kwargs):
         usuario = usuario_atual()
         if not usuario:
+            tinha_cookie = bool(request.cookies.get(app.config['SESSION_COOKIE_NAME']))
             session.clear()
             if request.path.startswith('/api/'):
-                return jsonify({'erro': 'Não autenticado'}), 401
-            return redirect('/login')
+                return jsonify({'erro': 'Não autenticado', 'redirect': '/login'}), 401
+            # Se havia cookie (sessão expirou) informa o usuário; senão redireciona limpo
+            return redirect('/login?sessao=expirada' if tinha_cookie else '/login')
         if not usuario['ativo']:
             session.clear()
             if request.path.startswith('/api/'):
-                return jsonify({'erro': 'Usuário desativado.'}), 403
-            return redirect('/login')
+                return jsonify({'erro': 'Usuário desativado.', 'redirect': '/login?motivo=inativo'}), 403
+            return redirect('/login?motivo=inativo')
         if usuario['deve_trocar_senha'] and request.path not in ROTAS_LIBERADAS_TROCA_SENHA:
             if request.path.startswith('/api/'):
                 return jsonify({
@@ -1052,12 +1066,13 @@ def registrar_email_usuario_log(usuario_id, email_destino, payload, resultado):
     }
 
 
-def tentar_enviar_email_acesso_usuario(usuario):
+def tentar_enviar_email_acesso_usuario(usuario, senha: str | None = None):
     payload = montar_email_acesso(
         usuario['nome'],
         usuario['email'],
         usuario['usuario'],
         request.host_url.rstrip('/'),
+        senha=senha,
     )
     resultado = enviar_email(payload)
     log = registrar_email_usuario_log(usuario['id'], usuario['email'], payload, resultado)
@@ -1151,6 +1166,73 @@ def registrar_tentativa(ip):
 def limpar_tentativas(ip):
     conn = conectar_users()
     conn.execute('DELETE FROM login_tentativas WHERE ip = ?', (ip,))
+    conn.commit()
+    conn.close()
+
+
+# Rate-limit por username — reutiliza a mesma tabela com prefixo "U:" como chave
+def _chave_usuario_tentativa(login: str) -> str:
+    return f'U:{login}'
+
+def verificar_bloqueio_usuario(login: str) -> bool:
+    return verificar_bloqueio(_chave_usuario_tentativa(login))
+
+def registrar_tentativa_usuario(login: str) -> None:
+    registrar_tentativa(_chave_usuario_tentativa(login))
+
+def limpar_tentativas_usuario(login: str) -> None:
+    limpar_tentativas(_chave_usuario_tentativa(login))
+
+
+# ── Recuperação de senha por e-mail ──────────────────────────────────────────
+
+RESET_TOKEN_EXPIRACAO_MINUTOS = 60
+
+def _hash_reset_token(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _criar_reset_token(usuario_id: int, ip: str) -> str:
+    """Gera token seguro, cancela tokens anteriores do usuário e persiste o hash."""
+    token      = secrets.token_urlsafe(32)
+    token_hash = _hash_reset_token(token)
+    expira     = (agora_sp() + timedelta(minutes=RESET_TOKEN_EXPIRACAO_MINUTOS)).strftime('%Y-%m-%d %H:%M:%S')
+    conn = conectar_users()
+    conn.execute('DELETE FROM reset_tokens WHERE usuario_id = ? AND usado_em IS NULL', (usuario_id,))
+    conn.execute(
+        'INSERT INTO reset_tokens (usuario_id, token_hash, criado_em, expira_em, ip) '
+        'VALUES (?, ?, ?, ?, ?)',
+        (usuario_id, token_hash, agora(), expira, ip),
+    )
+    conn.commit()
+    conn.close()
+    return token
+
+
+def _validar_reset_token(token: str) -> tuple:
+    """Retorna (row, None) se válido ou (None, mensagem_de_erro) se inválido."""
+    if not token:
+        return None, 'Link invalido.'
+    token_hash = _hash_reset_token(token)
+    conn = conectar_users()
+    row = conn.execute(
+        'SELECT id, usuario_id, expira_em, usado_em FROM reset_tokens WHERE token_hash = ?',
+        (token_hash,),
+    ).fetchone()
+    conn.close()
+    if not row:
+        return None, 'Link invalido ou ja utilizado.'
+    if row['usado_em']:
+        return None, 'Este link ja foi utilizado. Solicite um novo se necessario.'
+    expira = parse_db_datetime(row['expira_em'])
+    if agora_sp() > expira:
+        return None, 'Link expirado. Solicite um novo link de recuperacao.'
+    return row, None
+
+
+def _marcar_reset_token_usado(token_id: int) -> None:
+    conn = conectar_users()
+    conn.execute('UPDATE reset_tokens SET usado_em = ? WHERE id = ?', (agora(), token_id))
     conn.commit()
     conn.close()
 
@@ -2854,12 +2936,124 @@ def pagina_cadastro():
     return redirect('/login')
 
 
+# ── Esqueci minha senha ───────────────────────────────────────────────────────
+
+@app.route('/esqueci-senha')
+def pagina_esqueci_senha():
+    if session.get('usuario_id'):
+        return redirect('/relatorios')
+    return render_template('auth/esqueci_senha.html')
+
+
+@app.route('/api/esqueci-senha', methods=['POST'])
+def api_esqueci_senha():
+    dados = request.get_json() or {}
+    email = (dados.get('email') or '').strip().lower()
+    ip    = _obter_ip_real()
+
+    if not email:
+        return jsonify({'erro': 'Informe o e-mail.'}), 400
+
+    usuario = obter_usuario_por_email(email)
+    if usuario and usuario['ativo']:
+        # Anti-flood: ignora se já existe token válido criado nos últimos 5 min
+        conn = conectar_users()
+        recente = conn.execute(
+            'SELECT criado_em FROM reset_tokens '
+            'WHERE usuario_id = ? AND usado_em IS NULL '
+            'ORDER BY id DESC LIMIT 1',
+            (usuario['id'],),
+        ).fetchone()
+        conn.close()
+
+        deve_enviar = True
+        if recente:
+            criado = parse_db_datetime(recente['criado_em'])
+            if agora_sp() - criado < timedelta(minutes=5):
+                deve_enviar = False
+
+        if deve_enviar:
+            token     = _criar_reset_token(usuario['id'], ip)
+            reset_url = f'{request.host_url.rstrip("/")}/recuperar-senha/{token}'
+            payload   = montar_email_recuperacao_senha(usuario['nome'], email, reset_url)
+            enviar_email(payload)
+            registrar_auditoria_admin(
+                'reset_senha_link_enviado',
+                usuario_afetado_id=usuario['id'],
+                usuario_afetado_login=usuario['usuario'],
+                detalhe=f'Link de recuperacao de senha enviado para {email}.',
+            )
+
+    # Sempre retorna a mesma mensagem para não revelar se o e-mail existe
+    return jsonify({
+        'mensagem': 'Se o e-mail estiver cadastrado, voce recebera o link em breve. '
+                    'Verifique sua caixa de entrada e a pasta de spam.',
+    }), 200
+
+
+@app.route('/recuperar-senha/<token>')
+def pagina_recuperar_senha(token):
+    if session.get('usuario_id'):
+        return redirect('/relatorios')
+    row, erro_token = _validar_reset_token(token)
+    return render_template(
+        'auth/recuperar_senha.html',
+        token=token,
+        token_valido=(row is not None),
+        erro_token=erro_token,
+    )
+
+
+@app.route('/api/recuperar-senha', methods=['POST'])
+def api_recuperar_senha():
+    dados          = request.get_json() or {}
+    token          = dados.get('token', '').strip()
+    nova_senha     = dados.get('nova_senha', '')
+    confirmar      = dados.get('confirmar_senha', '')
+
+    if not token or not nova_senha or not confirmar:
+        return jsonify({'erro': 'Preencha todos os campos.'}), 400
+    if nova_senha != confirmar:
+        return jsonify({'erro': 'As senhas nao conferem.'}), 400
+    if len(nova_senha) < 10:
+        return jsonify({'erro': 'A nova senha deve ter pelo menos 10 caracteres.'}), 400
+    if not any(c.isdigit() for c in nova_senha):
+        return jsonify({'erro': 'A nova senha deve conter pelo menos um numero.'}), 400
+
+    row, erro = _validar_reset_token(token)
+    if row is None:
+        return jsonify({'erro': erro}), 400
+
+    usuario = obter_usuario_por_id(row['usuario_id'])
+    if not usuario or not usuario['ativo']:
+        return jsonify({'erro': 'Usuario nao encontrado ou desativado.'}), 400
+
+    conn = conectar_users()
+    conn.execute(
+        'UPDATE usuarios SET senha = ?, deve_trocar_senha = 0, atualizado_em = ? WHERE id = ?',
+        (generate_password_hash(nova_senha), agora(), usuario['id']),
+    )
+    conn.commit()
+    conn.close()
+
+    _marcar_reset_token_usado(row['id'])
+
+    registrar_log('reset_senha_via_email', usuario['id'], usuario['nome'])
+    registrar_auditoria_admin(
+        'reset_senha_via_email',
+        usuario_afetado_id=usuario['id'],
+        usuario_afetado_login=usuario['usuario'],
+        detalhe='Senha redefinida via link de recuperacao por e-mail.',
+    )
+    return jsonify({
+        'mensagem': 'Senha redefinida com sucesso.',
+        'redirect': '/login?senha=redefinida',
+    }), 200
+
+
 @app.route('/api/login', methods=['POST'])
 def api_login():
     ip = _obter_ip_real()
-
-    if verificar_bloqueio(ip):
-        return jsonify({'erro': f'Muitas tentativas. Aguarde {BLOQUEIO_MINUTOS} minutos.'}), 429
 
     dados = request.get_json()
     if not dados:
@@ -2870,6 +3064,10 @@ def api_login():
 
     if not usuario or not senha:
         return jsonify({'erro': 'Preencha todos os campos'}), 400
+
+    # Bloqueia por IP E por username independentemente
+    if verificar_bloqueio(ip) or verificar_bloqueio_usuario(usuario):
+        return jsonify({'erro': f'Muitas tentativas. Aguarde {BLOQUEIO_MINUTOS} minutos.'}), 429
 
     user = obter_usuario_por_login(usuario)
 
@@ -2884,9 +3082,10 @@ def api_login():
             return jsonify({'erro': 'Usuário desativado. Entre em contato com o TI.'}), 403
 
         limpar_tentativas(ip)
+        limpar_tentativas_usuario(usuario)
         session.clear()
         atualizar_sessao_usuario(user)
-        session.permanent = True
+        _gerar_csrf_token(force=True)   # rotaciona o CSRF após cada login
         conn = conectar_users()
         conn.execute(
             'UPDATE usuarios SET ultimo_login_em = ?, atualizado_em = ? WHERE id = ?',
@@ -2906,6 +3105,7 @@ def api_login():
         return jsonify({'mensagem': 'Login realizado com sucesso', 'redirect': '/relatorios'}), 200
 
     registrar_tentativa(ip)
+    registrar_tentativa_usuario(usuario)
     if user:
         registrar_auditoria_admin(
             'login_negado_senha_incorreta',
@@ -2944,8 +3144,10 @@ def api_primeiro_acesso():
         return jsonify({'erro': 'Preencha todos os campos.'}), 400
     if nova_senha != confirmar_senha:
         return jsonify({'erro': 'A confirmação da senha não confere.'}), 400
-    if len(nova_senha) < 6:
-        return jsonify({'erro': 'A nova senha deve ter pelo menos 6 caracteres.'}), 400
+    if len(nova_senha) < 10:
+        return jsonify({'erro': 'A nova senha deve ter pelo menos 10 caracteres.'}), 400
+    if not any(c.isdigit() for c in nova_senha):
+        return jsonify({'erro': 'A nova senha deve conter pelo menos um número.'}), 400
     if nova_senha == usuario['usuario']:
         return jsonify({'erro': 'A nova senha não pode ser igual ao login.'}), 400
     if not check_password_hash(usuario['senha'], senha_atual):
@@ -2964,6 +3166,7 @@ def api_primeiro_acesso():
     conn.close()
 
     atualizar_sessao_usuario(obter_usuario_por_id(usuario['id']))
+    _gerar_csrf_token(force=True)   # rotaciona o CSRF após troca de senha
     registrar_log('troca_senha_primeiro_acesso', usuario['id'], usuario['nome'])
     registrar_auditoria_admin(
         'troca_senha_primeiro_acesso',
@@ -4227,7 +4430,7 @@ def api_admin_criar_usuario():
     if obter_usuario_por_email(email_normalizado):
         return jsonify({'erro': 'Já existe um usuário com esse e-mail.'}), 409
 
-    senha_inicial = usuario_login
+    senha_inicial = secrets.token_urlsafe(10)   # senha aleatória, não igual ao login
     conn = conectar_users()
     cursor = conn.execute(
         '''
@@ -4248,13 +4451,13 @@ def api_admin_criar_usuario():
     conn.commit()
     conn.close()
     novo_usuario = obter_usuario_por_id(novo_usuario_id)
-    email_resultado = tentar_enviar_email_acesso_usuario(novo_usuario)
+    email_resultado = tentar_enviar_email_acesso_usuario(novo_usuario, senha_inicial)
 
     registrar_auditoria_admin(
         'usuario_criado',
         usuario_afetado_id=novo_usuario_id,
         usuario_afetado_login=usuario_login,
-        detalhe='Usuário criado com senha inicial igual ao login.',
+        detalhe='Usuário criado com senha inicial aleatória.',
         depois={
             'email': email_normalizado,
             'nome': nome,
@@ -4361,6 +4564,9 @@ def api_admin_status_usuario(usuario_id):
             usuario['id'],
         )
     )
+    if not ativo:
+        # Revoga todos os tokens OData do usuário ao desativar a conta
+        conn.execute('UPDATE api_tokens SET ativo = 0 WHERE usuario_id = ?', (usuario['id'],))
     conn.commit()
     conn.close()
 
@@ -4390,6 +4596,7 @@ def api_admin_reset_senha(usuario_id):
     if not usuario:
         return jsonify({'erro': 'Usuário não encontrado.'}), 404
 
+    nova_senha = secrets.token_urlsafe(10)   # senha aleatória, não igual ao login
     conn = conectar_users()
     conn.execute(
         '''
@@ -4397,18 +4604,25 @@ def api_admin_reset_senha(usuario_id):
         SET senha = ?, deve_trocar_senha = 1, atualizado_em = ?
         WHERE id = ?
         ''',
-        (generate_password_hash(usuario['usuario']), agora(), usuario['id'])
+        (generate_password_hash(nova_senha), agora(), usuario['id'])
     )
     conn.commit()
     conn.close()
+
+    email_resultado = tentar_enviar_email_acesso_usuario(
+        obter_usuario_por_id(usuario_id), nova_senha
+    )
 
     registrar_auditoria_admin(
         'usuario_reset_senha',
         usuario_afetado_id=usuario['id'],
         usuario_afetado_login=usuario['usuario'],
-        detalhe='Senha resetada para o login.'
+        detalhe='Senha resetada com senha aleatória e e-mail enviado automaticamente.'
     )
-    return jsonify({'mensagem': 'Senha resetada com sucesso.'}), 200
+    mensagem = 'Senha resetada e e-mail enviado ao usuário.'
+    if not email_resultado['ok']:
+        mensagem = 'Senha resetada, mas o e-mail não foi enviado. Verifique a configuração do Gmail.'
+    return jsonify({'mensagem': mensagem, 'email_enviado': email_resultado['ok']}), 200
 
 
 @app.route('/api/admin/usuarios/<int:usuario_id>/reenviar-email', methods=['POST'])

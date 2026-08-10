@@ -105,10 +105,12 @@ def montar_email_acesso(
     email_destino: str,
     login: str,
     app_base_url: str | None = None,
+    senha: str | None = None,
 ) -> dict:
-    app_base_url = (app_base_url or configuracao_email()['app_base_url']).rstrip('/')
-    login_url    = f'{app_base_url}/login'
-    assunto      = 'Seu acesso foi criado — ProtheusData'
+    app_base_url  = (app_base_url or configuracao_email()['app_base_url']).rstrip('/')
+    login_url     = f'{app_base_url}/login'
+    assunto       = 'Seu acesso foi criado — ProtheusData'
+    senha_exibida = senha if senha else login   # fallback para legados sem senha gerada
 
     primeiro_nome = nome.split()[0] if nome else nome
 
@@ -117,7 +119,7 @@ def montar_email_acesso(
         'Seu acesso à ProtheusData foi criado.\n\n'
         f'  Endereço : {login_url}\n'
         f'  Login    : {login}\n'
-        f'  Senha    : {login}\n\n'
+        f'  Senha    : {senha_exibida}\n\n'
         'Na primeira entrada o sistema pedirá a troca obrigatória da senha.\n\n'
         '---\n'
         'Este é um e-mail automático. Não responda esta mensagem.\n'
@@ -178,7 +180,7 @@ def montar_email_acesso(
                   <p style="margin:0;color:#9a9a9a;font-size:10px;font-weight:700;
                             letter-spacing:1px;text-transform:uppercase;">Senha inicial</p>
                   <p style="margin:4px 0 0;color:#1a1a1a;font-size:15px;
-                            font-weight:600;font-family:monospace;">{login}</p>
+                            font-weight:600;font-family:monospace;">{senha_exibida}</p>
                 </td>
               </tr>
             </table>
@@ -251,6 +253,137 @@ def montar_email_acesso(
         'html':    corpo_html,
         'login':   login,
         'url':     login_url,
+    }
+
+
+# ─── Montagem do e-mail de recuperação de senha ──────────────────────────────
+
+def montar_email_recuperacao_senha(
+    nome: str,
+    email_destino: str,
+    reset_url: str,
+) -> dict:
+    assunto      = 'Recuperacao de senha — ProtheusData'
+    primeiro_nome = nome.split()[0] if nome else nome
+
+    corpo_texto = (
+        f'Ola, {primeiro_nome}.\n\n'
+        'Recebemos uma solicitacao de recuperacao de senha para sua conta.\n\n'
+        f'  Clique no link abaixo para redefinir sua senha:\n'
+        f'  {reset_url}\n\n'
+        'O link expira em 1 hora.\n\n'
+        'Se voce nao solicitou a recuperacao de senha, ignore este e-mail.\n'
+        'Sua senha nao sera alterada.\n\n'
+        '---\n'
+        'Este e um e-mail automatico. Nao responda esta mensagem.\n'
+        f'Em caso de duvidas, abra um chamado em: {CHAMADOS_URL}\n'
+    )
+
+    corpo_html = f"""<!DOCTYPE html>
+<html lang="pt-BR">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f4f4f4;font-family:Arial,Helvetica,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f4;padding:32px 16px;">
+    <tr><td align="center">
+      <table width="100%" cellpadding="0" cellspacing="0"
+             style="max-width:560px;background:#ffffff;border:1px solid #e0e0e0;">
+
+        <!-- cabeçalho -->
+        <tr>
+          <td style="background:#1a1a1a;padding:28px 32px;">
+            <p style="margin:0;color:#ffffff;font-size:11px;font-weight:700;
+                      letter-spacing:2px;text-transform:uppercase;">ProtheusData</p>
+            <p style="margin:6px 0 0;color:#cccccc;font-size:13px;">
+              Central de Relatorios
+            </p>
+          </td>
+        </tr>
+
+        <!-- corpo -->
+        <tr>
+          <td style="padding:32px 32px 24px;">
+            <p style="margin:0 0 6px;color:#8a8a8a;font-size:11px;
+                      font-weight:700;letter-spacing:1.5px;text-transform:uppercase;">
+              Recuperacao de senha
+            </p>
+            <h1 style="margin:0 0 20px;color:#1a1a1a;font-size:22px;
+                       font-weight:700;letter-spacing:-0.5px;line-height:1.3;">
+              Ola, {primeiro_nome}!<br>Redefina sua senha.
+            </h1>
+            <p style="margin:0 0 24px;color:#555555;font-size:14px;line-height:1.7;">
+              Recebemos uma solicitacao de recuperacao de senha para sua conta
+              na <strong>ProtheusData</strong>.
+              Clique no botao abaixo para criar uma nova senha.
+            </p>
+
+            <!-- botão -->
+            <table cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
+              <tr>
+                <td style="background:#1a1a1a;">
+                  <a href="{reset_url}"
+                     style="display:inline-block;padding:14px 28px;
+                            color:#ffffff;font-size:12px;font-weight:700;
+                            letter-spacing:1px;text-transform:uppercase;
+                            text-decoration:none;">
+                    Redefinir minha senha &rarr;
+                  </a>
+                </td>
+              </tr>
+            </table>
+
+            <!-- aviso de expiração -->
+            <table width="100%" cellpadding="0" cellspacing="0"
+                   style="background:#f7f7f7;border:1px solid #e8e8e8;margin-bottom:20px;">
+              <tr>
+                <td style="padding:12px 16px;">
+                  <p style="margin:0;color:#8a8a8a;font-size:11px;line-height:1.6;">
+                    Este link expira em <strong>1 hora</strong>.
+                    Apos expirar, sera necessario solicitar um novo link.
+                  </p>
+                </td>
+              </tr>
+            </table>
+
+            <p style="margin:0 0 8px;color:#9a9a9a;font-size:11px;line-height:1.6;">
+              Se voce nao solicitou a recuperacao de senha,
+              <strong>ignore este e-mail</strong>. Sua senha nao sera alterada.
+            </p>
+            <p style="margin:0;color:#9a9a9a;font-size:11px;line-height:1.6;">
+              Se o botao nao funcionar, copie e cole este endereco no navegador:<br>
+              <a href="{reset_url}"
+                 style="color:#555555;word-break:break-all;">{reset_url}</a>
+            </p>
+          </td>
+        </tr>
+
+        <!-- rodapé -->
+        <tr>
+          <td style="padding:20px 32px;border-top:1px solid #eeeeee;background:#fafafa;">
+            <p style="margin:0 0 6px;color:#9a9a9a;font-size:11px;">
+              Precisa de ajuda?
+              <a href="{CHAMADOS_URL}"
+                 style="color:#1a1a1a;font-size:11px;font-weight:700;">
+                Yellow Tickets &rarr;
+              </a>
+            </p>
+            <p style="margin:0;color:#bbbbbb;font-size:10px;">
+              ProtheusData &middot; Mensagem automatica
+            </p>
+          </td>
+        </tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>"""
+
+    return {
+        'to':      email_destino,
+        'subject': assunto,
+        'body':    corpo_texto,
+        'html':    corpo_html,
+        'url':     reset_url,
     }
 
 

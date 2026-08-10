@@ -201,14 +201,25 @@ body {
     transform: translateY(0);
 }
 
-.link-cadastro {
+.erro.sucesso {
+    color: #1a7a3b;
+}
+
+.link-esqueci {
     margin-top: 14px;
-    padding-top: 14px;
-    border-top: 1px solid #ececec;
-    font-size: 10px;
-    letter-spacing: 0.3px;
-    color: #b9b9b9;
-    line-height: 1.5;
+    text-align: center;
+}
+
+.link-esqueci a {
+    color: #999999;
+    font-size: 11px;
+    text-decoration: none;
+    letter-spacing: 0.2px;
+}
+
+.link-esqueci a:hover {
+    color: #1a1a1a;
+    text-decoration: underline;
 }
 
 .campo input:focus-visible,

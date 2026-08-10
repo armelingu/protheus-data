@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="/favicon.png">
+    <link rel="shortcut icon" href="/favicon.ico">
+    <link rel="stylesheet" href="/statics/css/auth/primeiro_acesso.css">
+    <title>ProtheusData - Redefinir senha</title>
+</head>
+<body>
+    <div class="first-access-container">
+        <div class="first-access-area">
+            <p class="first-access-kicker">Recuperacao de senha</p>
+            <h1>Redefinir senha</h1>
+
+            {% if not token_valido %}
+                <p class="first-access-intro" style="color:#c0392b;margin-top:8px;">
+                    {{ erro_token }}
+                </p>
+                <p class="campo-hint" style="margin-top:12px;">
+                    Solicite um novo link na pagina de recuperacao de senha.
+                </p>
+                <p class="link-sair"><a href="/esqueci-senha">Solicitar novo link</a></p>
+            {% else %}
+                <p class="first-access-intro">
+                    Escolha uma nova senha para sua conta. A senha deve ter pelo menos
+                    10 caracteres e conter pelo menos um numero.
+                </p>
+
+                <form id="recuperar-form">
+                    <input type="hidden" id="token" value="{{ token }}">
+                    <div class="campo">
+                        <label for="nova_senha">Nova senha</label>
+                        <input type="password" id="nova_senha" name="nova_senha"
+                               placeholder="Minimo 10 caracteres"
+                               autocomplete="new-password" required>
+                        <p class="campo-hint">Minimo 10 caracteres e pelo menos 1 numero.</p>
+                    </div>
+                    <div class="campo">
+                        <label for="confirmar_senha">Confirmar nova senha</label>
+                        <input type="password" id="confirmar_senha" name="confirmar_senha"
+                               placeholder="Repita a nova senha"
+                               autocomplete="new-password" required>
+                    </div>
+                    <button type="submit" id="btn-salvar">Salvar nova senha</button>
+                </form>
+
+                <div class="erro" id="erro" aria-live="polite"></div>
+                <p class="link-sair"><a href="/login">Voltar ao login</a></p>
+                <script src="/statics/js/auth/recuperar_senha.js"></script>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>

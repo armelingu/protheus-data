@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="/favicon.png">
+    <link rel="shortcut icon" href="/favicon.ico">
+    <link rel="stylesheet" href="/statics/css/auth/primeiro_acesso.css">
+    <title>ProtheusData - Recuperar senha</title>
+</head>
+<body>
+    <div class="first-access-container">
+        <div class="first-access-area">
+            <p class="first-access-kicker">Recuperacao de senha</p>
+            <h1>Esqueci minha senha</h1>
+            <p class="first-access-intro">
+                Informe o e-mail cadastrado na sua conta. Se encontrarmos um cadastro,
+                enviaremos um link para voce criar uma nova senha.
+            </p>
+
+            <div id="estado-form">
+                <form id="esqueci-form">
+                    <div class="campo">
+                        <label for="email">E-mail cadastrado</label>
+                        <input type="email" id="email" name="email"
+                               placeholder="seu@email.com"
+                               autocomplete="email" required>
+                    </div>
+                    <button type="submit" id="btn-enviar">Enviar link de recuperacao</button>
+                </form>
+                <div class="erro" id="erro" aria-live="polite"></div>
+            </div>
+
+            <div id="estado-sucesso" style="display:none;">
+                <p class="first-access-intro" style="margin-top:8px;">
+                    Se o e-mail estiver cadastrado, voce recebera um link em breve.
+                    Verifique sua caixa de entrada e a pasta de spam.
+                </p>
+                <p class="campo-hint" style="margin-top:12px;">
+                    O link expira em 1 hora.
+                </p>
+            </div>
+
+            <p class="link-sair"><a href="/login">Voltar ao login</a></p>
+        </div>
+    </div>
+    <script src="/statics/js/auth/esqueci_senha.js"></script>
+</body>
+</html>

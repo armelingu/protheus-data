@@ -112,11 +112,36 @@ button:disabled {
     cursor: not-allowed;
 }
 
+.campo-hint {
+    margin-top: 5px;
+    font-size: 10px;
+    color: #b0b0b0;
+    line-height: 1.5;
+}
+
 .erro {
     color: #cc0000;
     font-size: 11px;
     margin-top: 16px;
     min-height: 14px;
+}
+
+.link-sair {
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid #ececec;
+    text-align: center;
+}
+
+.link-sair a {
+    font-size: 10px;
+    color: #b9b9b9;
+    text-decoration: none;
+    letter-spacing: 0.3px;
+}
+
+.link-sair a:hover {
+    color: #555555;
 }
 
 @keyframes fadeIn {
