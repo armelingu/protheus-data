@@ -92,6 +92,11 @@ from services.relatorios.energy.contas_pagar import (
     sincronizar_energy_contas_pagar,
     carga_inicial_energy_contas_pagar,
 )
+from services.relatorios.energy.nf_saida import (
+    full_refresh_energy_nf_saida,
+    sincronizar_energy_nf_saida,
+    carga_inicial_energy_nf_saida,
+)
 
 # Estoque
 from services.relatorios.estoque.saldos import (
@@ -247,7 +252,8 @@ _JOBS_FINANCEIRO = [
     ('Contas a Receber',      full_refresh_contas_receber),
     ('Contas a Pagar',        full_refresh_contas_pagar),
     ('Movimentos Bancários',  full_refresh_mov_bancarios),
-    ('Energy - Contas Pagar', full_refresh_energy_contas_pagar),
+    ('Energy - Contas Pagar',    full_refresh_energy_contas_pagar),
+    ('Energy - Contas Receber',  full_refresh_energy_nf_saida),
 ]
 
 _JOBS_SYNC_INCREMENTAL = [
@@ -266,7 +272,8 @@ _JOBS_SYNC_FINANCEIRO = [
     ('Contas a Receber',      sincronizar_contas_receber),
     ('Contas a Pagar',        sincronizar_contas_pagar),
     ('Movimentos Bancários',  sincronizar_mov_bancarios),
-    ('Energy - Contas Pagar', sincronizar_energy_contas_pagar),
+    ('Energy - Contas Pagar',   sincronizar_energy_contas_pagar),
+    ('Energy - Contas Receber', sincronizar_energy_nf_saida),
 ]
 
 _JOBS_CARGA_INICIAL = [
@@ -283,6 +290,7 @@ _JOBS_CARGA_INICIAL = [
     ('Contas a Pagar',              carga_inicial_contas_pagar),
     ('Movimentos Bancários',        carga_inicial_mov_bancarios),
     ('Energy - Contas Pagar',       carga_inicial_energy_contas_pagar),
+    ('Energy - Contas Receber',     carga_inicial_energy_nf_saida),
 ]
 
 

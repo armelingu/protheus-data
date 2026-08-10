@@ -436,8 +436,8 @@ document.addEventListener('DOMContentLoaded', function() {
     formCriar.addEventListener('submit', function(event) {
         event.preventDefault();
         var email = formCriar.email.value.trim().toLowerCase();
-        if (!/^[^\s@]+@(hbraviacao|hbrenergy)\.com\.br$/.test(email)) {
-            mostrarMensagem('Use um e-mail corporativo @hbraviacao.com.br ou @hbrenergy.com.br.', 'erro');
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            mostrarMensagem('Informe um e-mail válido.', 'erro');
             return;
         }
 

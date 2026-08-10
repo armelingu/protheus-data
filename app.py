@@ -119,6 +119,12 @@ from services.relatorios.energy.contas_pagar import (
     sincronizar_energy_contas_pagar, carga_inicial_energy_contas_pagar,
     QUERY_PAGINADA as QUERY_ENERGY_CONTAS_PAGAR,
 )
+from services.relatorios.energy.nf_saida import (
+    gerar_csv_energy_nf_saida, gerar_excel_energy_nf_saida,
+    info_relatorio_energy_nf_saida, historico_sync_energy_nf_saida,
+    sincronizar_energy_nf_saida, carga_inicial_energy_nf_saida,
+    QUERY_PAGINADA as QUERY_ENERGY_NF_SAIDA,
+)
 from services.relatorios.financeiro.contas_pagar import (
     gerar_csv_contas_pagar, gerar_excel_contas_pagar,
     info_relatorio_contas_pagar, historico_sync_contas_pagar,
@@ -256,7 +262,7 @@ def _no_cache_em_apis(resp):
 SYNC_INTERVALO = 3600
 MAX_TENTATIVAS_LOGIN = 5
 BLOQUEIO_MINUTOS = 5
-EMAIL_CORPORATIVOS_DOMINIOS = ('hbraviacao.com.br', 'hbrenergy.com.br')
+EMAIL_CORPORATIVOS_DOMINIOS = ()
 
 # Quando TRUST_PROXY_HEADERS=true, lê o IP real do cliente via X-Forwarded-For
 # (definido pelo proxy/Nginx). Manter false se o app estiver exposto diretamente.
@@ -338,9 +344,8 @@ def normalizar_email_corporativo(email):
         raise ValueError('Informe um e-mail corporativo válido.')
 
     login, dominio = email_normalizado.split('@', 1)
-    if dominio not in EMAIL_CORPORATIVOS_DOMINIOS:
-        permitidos = ', '.join('@' + d for d in EMAIL_CORPORATIVOS_DOMINIOS)
-        raise ValueError(f'Apenas e-mails corporativos são permitidos ({permitidos}).')
+    if not dominio or '.' not in dominio:
+        raise ValueError('O e-mail informado é inválido.')
     if not login:
         raise ValueError('O e-mail informado é inválido.')
     return email_normalizado
@@ -4070,6 +4075,46 @@ def api_energy_contas_pagar_download():
     return _financeiro_download_response(
         gerar_csv_energy_contas_pagar, gerar_excel_energy_contas_pagar,
         'energy_contas_pagar', fmt, di, df,
+    )
+
+# ── Energy — Contas a Receber (SE1) ──────────────────────────────────────────
+
+@app.route('/relatorios/energy/nf-saida')
+@acesso_relatorio_requerido('energy', 'nf_saida')
+def pagina_energy_nf_saida():
+    usuario = usuario_atual()
+    pode_ver_query = bool(usuario and usuario['is_admin'] and usuario['pode_ver_query'])
+    return render_template(
+        'relatorios/energy_nf_saida.html',
+        query_preview=QUERY_ENERGY_NF_SAIDA if pode_ver_query else '',
+        pode_ver_query=pode_ver_query,
+        **contexto_auth('ProtheusData - Energy Contas a Receber'),
+    )
+
+@app.route('/api/relatorios/energy/nf-saida/info')
+@acesso_relatorio_requerido('energy', 'nf_saida')
+def api_energy_nf_saida_info():
+    return _financeiro_info_response(info_relatorio_energy_nf_saida)
+
+@app.route('/api/relatorios/energy/nf-saida/historico-sync')
+@acesso_relatorio_requerido('energy', 'nf_saida')
+def api_energy_nf_saida_historico():
+    return _financeiro_historico_response(historico_sync_energy_nf_saida)
+
+@app.route('/api/relatorios/energy/nf-saida/sync', methods=['POST'])
+@acesso_relatorio_requerido('energy', 'nf_saida')
+def api_energy_nf_saida_sync():
+    return _financeiro_sync_response(sincronizar_energy_nf_saida, 'energy_nf_saida')
+
+@app.route('/api/relatorios/energy/nf-saida/download')
+@acesso_relatorio_requerido('energy', 'nf_saida')
+def api_energy_nf_saida_download():
+    fmt = request.args.get('formato', 'csv')
+    di  = _iso_para_protheus(request.args.get('data_inicio'))
+    df  = _iso_para_protheus(request.args.get('data_fim'))
+    return _financeiro_download_response(
+        gerar_csv_energy_nf_saida, gerar_excel_energy_nf_saida,
+        'energy_nf_saida', fmt, di, df,
     )
 
 

@@ -108,13 +108,13 @@ def montar_email_acesso(
 ) -> dict:
     app_base_url = (app_base_url or configuracao_email()['app_base_url']).rstrip('/')
     login_url    = f'{app_base_url}/login'
-    assunto      = 'Seu acesso foi criado — ProtheusData HBR'
+    assunto      = 'Seu acesso foi criado — ProtheusData'
 
     primeiro_nome = nome.split()[0] if nome else nome
 
     corpo_texto = (
         f'Olá, {primeiro_nome}.\n\n'
-        'Seu acesso à ProtheusData HBR foi criado.\n\n'
+        'Seu acesso à ProtheusData foi criado.\n\n'
         f'  Endereço : {login_url}\n'
         f'  Login    : {login}\n'
         f'  Senha    : {login}\n\n'
@@ -139,7 +139,7 @@ def montar_email_acesso(
             <p style="margin:0;color:#ffffff;font-size:11px;font-weight:700;
                       letter-spacing:2px;text-transform:uppercase;">ProtheusData</p>
             <p style="margin:6px 0 0;color:#cccccc;font-size:13px;">
-              Central de Relatórios HBR Aviação
+              Central de Relatórios
             </p>
           </td>
         </tr>
@@ -156,7 +156,7 @@ def montar_email_acesso(
               Olá, {primeiro_nome}!<br>Seu acesso está pronto.
             </h1>
             <p style="margin:0 0 24px;color:#555555;font-size:14px;line-height:1.7;">
-              Sua conta na <strong>ProtheusData HBR</strong> foi criada.
+              Sua conta na <strong>ProtheusData</strong> foi criada.
               Use as credenciais abaixo para entrar. Na primeira vez, o sistema
               pedirá que você crie uma nova senha pessoal.
             </p>
@@ -233,7 +233,7 @@ def montar_email_acesso(
               </tr>
             </table>
             <p style="margin:14px 0 0;color:#bbbbbb;font-size:10px;">
-              ProtheusData · HBR Aviação · Mensagem automática
+              ProtheusData · Mensagem automática
             </p>
           </td>
         </tr>

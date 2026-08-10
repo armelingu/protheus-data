@@ -129,6 +129,14 @@ RELATORIOS_CATALOGO = [
                 'api_base': '/api/relatorios/energy/pedidos-conta-05001',
                 'ativo': True,
             },
+            {
+                'id': 'nf_saida',
+                'titulo': 'Contas a Receber',
+                'descricao': 'Títulos a receber (SE1) do negócio Energy (E1_ITEMC = 05.001).',
+                'path': '/relatorios/energy/nf-saida',
+                'api_base': '/api/relatorios/energy/nf-saida',
+                'ativo': True,
+            },
         ],
     },
 ]

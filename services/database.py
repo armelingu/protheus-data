@@ -1035,6 +1035,38 @@ def criar_tabelas_financeiro():
         )
     ''')
 
+    # ── SE1010 Energy — Contas a Receber (E1_ITEMC = '05.001') ──────────────
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS energy_contas_receber (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            recno     INTEGER UNIQUE NOT NULL,
+            E1_FILIAL  TEXT, E1_PREFIXO TEXT, E1_NUM     TEXT, E1_PARCELA TEXT, E1_TIPO TEXT,
+            E1_CLIENTE TEXT, E1_LOJA    TEXT, E1_NOMCLI  TEXT,
+            E1_EMISSAO TEXT, E1_VENCTO  TEXT, E1_VENCREA TEXT,
+            E1_VALOR   REAL, E1_SALDO   REAL, E1_BAIXA   TEXT,
+            E1_NATUREZ TEXT, E1_HIST    TEXT,
+            E1_STATUS  TEXT, E1_SITUACA TEXT, E1_MOEDA   TEXT,
+            E1_PORTADO TEXT, E1_AGEDEP  TEXT,
+            E1_NUMNOTA TEXT, E1_SERIE   TEXT, E1_MOTIVO  TEXT,
+            E1_ITEMC   TEXT
+        )
+    ''')
+    conn.execute(
+        'CREATE INDEX IF NOT EXISTS idx_energy_cr_vencto '
+        'ON energy_contas_receber(E1_VENCTO)'
+    )
+    conn.execute(
+        'CREATE INDEX IF NOT EXISTS idx_energy_cr_cliente '
+        'ON energy_contas_receber(E1_CLIENTE)'
+    )
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS energy_contas_receber_sync_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            executado_em TEXT, registros_novos INTEGER DEFAULT 0,
+            status TEXT, erro_resumo TEXT
+        )
+    ''')
+
     # ── Log de downloads dos relatórios financeiros (auditoria) ──────────────
     conn.execute('''
         CREATE TABLE IF NOT EXISTS financeiro_downloads_log (
