@@ -40,4 +40,18 @@ build/
 .DS_Store
 Thumbs.db
 
-integracao_pedcom
+integracao_pedcom/
+
+# Arquivos de backup e temporarios
+*.bak
+*.tmp
+*.orig
+
+# Cobertura de testes
+.coverage
+htmlcov/
+.pytest_cache/
+
+# SSH e segredos locais
+*.pem
+*.key
