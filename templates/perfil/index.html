@@ -44,22 +44,29 @@
 .endpoint-url { flex: 1; font-family: monospace; font-size: .82rem; color: #1a1a1a; word-break: break-all; }
 .endpoint-copy { padding: 5px 12px; border: 1px solid #e0e0e0; background: #fff; color: #1a1a1a; border-radius: 0; font-size: .8rem; cursor: pointer; white-space: nowrap; }
 .endpoint-copy:hover { background: #f5f5f5; }
+.campo-input-wrap-perfil {
+    position: relative;
+}
+.campo-input-wrap-perfil input {
+    padding-right: 40px;
+    width: 100%;
+}
 .btn-ver-senha-perfil {
     position: absolute;
-    right: 8px;
-    bottom: 8px;
+    right: 9px;
+    top: 50%;
+    transform: translateY(-50%);
     background: none;
     border: none;
-    padding: 2px 6px;
-    font-size: .72rem;
-    font-weight: 700;
-    letter-spacing: .4px;
-    text-transform: uppercase;
-    color: #aaa;
+    padding: 4px;
+    margin: 0;
+    color: #c0c0c0;
     cursor: pointer;
+    display: flex;
+    align-items: center;
+    line-height: 1;
 }
-.btn-ver-senha-perfil:hover { color: #1a1a1a; }
-.admin-field input { padding-right: 60px; }
+.btn-ver-senha-perfil:hover { color: #555; }
 </style>
 {% endblock %}
 
@@ -106,21 +113,27 @@
         </div>
         <div class="perfil-panel-body">
             <form id="form-alterar-senha" style="max-width:360px">
-                <div class="admin-field" style="margin-bottom:12px;position:relative">
+                <div class="admin-field" style="margin-bottom:12px">
                     <span>Senha atual</span>
-                    <input type="password" id="perfil-senha-atual" placeholder="Digite sua senha atual" autocomplete="current-password">
-                    <button type="button" class="btn-ver-senha-perfil" data-alvo="perfil-senha-atual">ver</button>
+                    <div class="campo-input-wrap-perfil">
+                        <input type="password" id="perfil-senha-atual" placeholder="Digite sua senha atual" autocomplete="current-password">
+                        <button type="button" class="btn-ver-senha-perfil" data-alvo="perfil-senha-atual" aria-label="Mostrar senha"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+                    </div>
                 </div>
-                <div class="admin-field" style="margin-bottom:12px;position:relative">
+                <div class="admin-field" style="margin-bottom:12px">
                     <span>Nova senha</span>
-                    <input type="password" id="perfil-nova-senha" placeholder="Minimo 10 caracteres" autocomplete="new-password">
-                    <button type="button" class="btn-ver-senha-perfil" data-alvo="perfil-nova-senha">ver</button>
+                    <div class="campo-input-wrap-perfil">
+                        <input type="password" id="perfil-nova-senha" placeholder="Minimo 10 caracteres" autocomplete="new-password">
+                        <button type="button" class="btn-ver-senha-perfil" data-alvo="perfil-nova-senha" aria-label="Mostrar senha"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+                    </div>
                     <small style="display:block;margin-top:4px;color:#aaa;font-size:.75rem">Minimo 10 caracteres e pelo menos 1 numero.</small>
                 </div>
-                <div class="admin-field" style="margin-bottom:16px;position:relative">
+                <div class="admin-field" style="margin-bottom:16px">
                     <span>Confirmar nova senha</span>
-                    <input type="password" id="perfil-confirmar-senha" placeholder="Repita a nova senha" autocomplete="new-password">
-                    <button type="button" class="btn-ver-senha-perfil" data-alvo="perfil-confirmar-senha">ver</button>
+                    <div class="campo-input-wrap-perfil">
+                        <input type="password" id="perfil-confirmar-senha" placeholder="Repita a nova senha" autocomplete="new-password">
+                        <button type="button" class="btn-ver-senha-perfil" data-alvo="perfil-confirmar-senha" aria-label="Mostrar senha"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+                    </div>
                 </div>
                 <button type="submit" class="admin-btn admin-btn-primario" id="btn-alterar-senha">Alterar senha</button>
                 <div id="alterar-senha-erro" style="margin-top:10px;font-size:.82rem;color:#c0392b;display:none"></div>
