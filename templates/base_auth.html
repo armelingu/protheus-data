@@ -64,9 +64,10 @@
                 </section>
                 {% endif %}
 
-                <a href="/meu-perfil" class="menu-link menu-link-perfil{% if current_path == '/meu-perfil' %} ativo{% endif %}" style="margin-top:8px;font-size:.8rem;color:#aaa">
-                    Meu Perfil &amp; Power BI
-                </a>
+                <div class="menu-usuario">
+                    <p class="menu-usuario-nome">{{ usuario_atual.nome.split()[0] if usuario_atual else '' }}</p>
+                    <a href="/meu-perfil" class="menu-usuario-link{% if current_path == '/meu-perfil' %} ativo{% endif %}">Perfil &amp; Power BI</a>
+                </div>
                 <button type="button" class="menu-sair" data-logout>Sair</button>
 
                 <div class="menu-rodape">

@@ -44,6 +44,22 @@
 .endpoint-url { flex: 1; font-family: monospace; font-size: .82rem; color: #1a1a1a; word-break: break-all; }
 .endpoint-copy { padding: 5px 12px; border: 1px solid #e0e0e0; background: #fff; color: #1a1a1a; border-radius: 0; font-size: .8rem; cursor: pointer; white-space: nowrap; }
 .endpoint-copy:hover { background: #f5f5f5; }
+.btn-ver-senha-perfil {
+    position: absolute;
+    right: 8px;
+    bottom: 8px;
+    background: none;
+    border: none;
+    padding: 2px 6px;
+    font-size: .72rem;
+    font-weight: 700;
+    letter-spacing: .4px;
+    text-transform: uppercase;
+    color: #aaa;
+    cursor: pointer;
+}
+.btn-ver-senha-perfil:hover { color: #1a1a1a; }
+.admin-field input { padding-right: 60px; }
 </style>
 {% endblock %}
 
@@ -71,10 +87,44 @@
                     <span>{{ usuario_atual.usuario }}</span>
                 </div>
                 <div class="info-item">
+                    <strong>E-mail</strong>
+                    <span>{{ usuario_atual.email or '—' }}</span>
+                </div>
+                <div class="info-item">
                     <strong>Perfil</strong>
                     <span>{% if usuario_atual.is_admin %}Superadmin{% elif usuario_atual.is_gerente %}Gerente{% else %}Usuário{% endif %}</span>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- Alterar senha -->
+    <div class="perfil-panel">
+        <div class="perfil-panel-head">
+            <h2>Alterar senha</h2>
+            <p>Redefina sua senha de acesso ao sistema.</p>
+        </div>
+        <div class="perfil-panel-body">
+            <form id="form-alterar-senha" style="max-width:360px">
+                <div class="admin-field" style="margin-bottom:12px;position:relative">
+                    <span>Senha atual</span>
+                    <input type="password" id="perfil-senha-atual" placeholder="Digite sua senha atual" autocomplete="current-password">
+                    <button type="button" class="btn-ver-senha-perfil" data-alvo="perfil-senha-atual">ver</button>
+                </div>
+                <div class="admin-field" style="margin-bottom:12px;position:relative">
+                    <span>Nova senha</span>
+                    <input type="password" id="perfil-nova-senha" placeholder="Minimo 10 caracteres" autocomplete="new-password">
+                    <button type="button" class="btn-ver-senha-perfil" data-alvo="perfil-nova-senha">ver</button>
+                    <small style="display:block;margin-top:4px;color:#aaa;font-size:.75rem">Minimo 10 caracteres e pelo menos 1 numero.</small>
+                </div>
+                <div class="admin-field" style="margin-bottom:16px;position:relative">
+                    <span>Confirmar nova senha</span>
+                    <input type="password" id="perfil-confirmar-senha" placeholder="Repita a nova senha" autocomplete="new-password">
+                    <button type="button" class="btn-ver-senha-perfil" data-alvo="perfil-confirmar-senha">ver</button>
+                </div>
+                <button type="submit" class="admin-btn admin-btn-primario" id="btn-alterar-senha">Alterar senha</button>
+                <div id="alterar-senha-erro" style="margin-top:10px;font-size:.82rem;color:#c0392b;display:none"></div>
+            </form>
         </div>
     </div>
 

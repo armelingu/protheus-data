@@ -1769,6 +1769,49 @@ def api_revogar_token(token_id):
     return jsonify({'mensagem': 'Token revogado com sucesso.'}), 200
 
 
+@app.route('/api/meu-perfil/alterar-senha', methods=['POST'])
+@login_requerido
+def api_alterar_senha_perfil():
+    dados         = request.get_json() or {}
+    senha_atual   = dados.get('senha_atual', '')
+    nova_senha    = dados.get('nova_senha', '')
+    confirmar     = dados.get('confirmar_senha', '')
+
+    if not senha_atual or not nova_senha or not confirmar:
+        return jsonify({'erro': 'Preencha todos os campos.'}), 400
+    if nova_senha != confirmar:
+        return jsonify({'erro': 'As senhas nao conferem.'}), 400
+    if len(nova_senha) < 10:
+        return jsonify({'erro': 'A nova senha deve ter pelo menos 10 caracteres.'}), 400
+    if not any(c.isdigit() for c in nova_senha):
+        return jsonify({'erro': 'A nova senha deve conter pelo menos um numero.'}), 400
+
+    uid = session['usuario_id']
+    usuario = obter_usuario_por_id(uid)
+    if not usuario or not check_password_hash(usuario['senha'], senha_atual):
+        return jsonify({'erro': 'Senha atual incorreta.'}), 400
+
+    conn = conectar_users()
+    conn.execute(
+        'UPDATE usuarios SET senha = ?, deve_trocar_senha = 0, atualizado_em = ? WHERE id = ?',
+        (generate_password_hash(nova_senha), agora(), uid),
+    )
+    conn.commit()
+    conn.close()
+
+    _gerar_csrf_token(force=True)
+
+    registrar_log('alterar_senha_perfil', uid, session.get('usuario_nome'))
+    registrar_auditoria_admin(
+        'alterar_senha_perfil',
+        usuario_afetado_id=uid,
+        usuario_afetado_login=usuario['usuario'],
+        detalhe='Senha alterada pelo proprio usuario via pagina de perfil.',
+    )
+    return jsonify({'mensagem': 'Senha alterada com sucesso.'}), 200
+
+
+
 # ── OData endpoints (Power BI / Excel) ───────────────────────────────────────
 
 # ═════════════════════════════════════════════════════════════════════════════

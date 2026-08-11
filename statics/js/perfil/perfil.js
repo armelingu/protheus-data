@@ -243,4 +243,87 @@ document.addEventListener('DOMContentLoaded', function() {
     renderizarEscopoOpcoes();
     atualizarUrlsInterface(null);
     carregarTokens();
+
+    /* ── Toggle mostrar/ocultar senha ────────────────────────────────────── */
+    document.querySelectorAll('.btn-ver-senha-perfil').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var input = document.getElementById(btn.dataset.alvo);
+            if (!input) return;
+            var visivel = input.type === 'text';
+            input.type = visivel ? 'password' : 'text';
+            btn.textContent = visivel ? 'ver' : 'ocultar';
+        });
+    });
+
+    /* ── Alterar senha ───────────────────────────────────────────────────── */
+    var formAlterarSenha = document.getElementById('form-alterar-senha');
+    if (formAlterarSenha) {
+        formAlterarSenha.addEventListener('submit', function (e) {
+            e.preventDefault();
+            var erroEl  = document.getElementById('alterar-senha-erro');
+            var btnEl   = document.getElementById('btn-alterar-senha');
+            var senhaAtual  = document.getElementById('perfil-senha-atual').value;
+            var novaSenha   = document.getElementById('perfil-nova-senha').value;
+            var confirmar   = document.getElementById('perfil-confirmar-senha').value;
+
+            erroEl.style.display = 'none';
+            erroEl.textContent   = '';
+
+            if (!senhaAtual || !novaSenha || !confirmar) {
+                erroEl.textContent = 'Preencha todos os campos.';
+                erroEl.style.display = 'block';
+                return;
+            }
+            if (novaSenha !== confirmar) {
+                erroEl.textContent = 'As senhas nao conferem.';
+                erroEl.style.display = 'block';
+                return;
+            }
+            if (novaSenha.length < 10) {
+                erroEl.textContent = 'A nova senha deve ter pelo menos 10 caracteres.';
+                erroEl.style.display = 'block';
+                return;
+            }
+            if (!/\d/.test(novaSenha)) {
+                erroEl.textContent = 'A nova senha deve conter pelo menos um numero.';
+                erroEl.style.display = 'block';
+                return;
+            }
+
+            var labelOriginal = btnEl.textContent;
+            btnEl.disabled    = true;
+            btnEl.textContent = 'Salvando...';
+
+            fetch('/api/meu-perfil/alterar-senha', {
+                method:  'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': (document.querySelector('meta[name="csrf-token"]') || {}).content || '',
+                },
+                body: JSON.stringify({
+                    senha_atual:     senhaAtual,
+                    nova_senha:      novaSenha,
+                    confirmar_senha: confirmar,
+                }),
+            })
+            .then(function (resp) {
+                return resp.json().then(function (data) {
+                    if (!resp.ok) throw new Error(data.erro || 'Erro ao alterar senha.');
+                    return data;
+                });
+            })
+            .then(function () {
+                formAlterarSenha.reset();
+                mostrarMensagem('Senha alterada com sucesso.');
+            })
+            .catch(function (err) {
+                erroEl.textContent   = err.message;
+                erroEl.style.display = 'block';
+            })
+            .finally(function () {
+                btnEl.disabled    = false;
+                btnEl.textContent = labelOriginal;
+            });
+        });
+    }
 });

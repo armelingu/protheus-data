@@ -18,18 +18,21 @@
             <p class="first-access-intro">Por segurança, sua senha inicial é temporária. Antes de acessar os relatórios, defina uma nova senha pessoal.</p>
 
             <form id="primeiro-acesso-form">
-                <div class="campo">
+                <div class="campo campo-senha">
                     <label for="senha_atual">Senha atual</label>
-                    <input type="password" id="senha_atual" name="senha_atual" placeholder="Digite a senha enviada por e-mail" autocomplete="current-password" required>
+                    <input type="password" id="senha_atual" name="senha_atual" placeholder="Digite a senha enviada por e-mail" autocomplete="current-password" required autofocus>
+                    <button type="button" class="btn-ver-senha" data-alvo="senha_atual">ver</button>
                 </div>
-                <div class="campo">
+                <div class="campo campo-senha">
                     <label for="nova_senha">Nova senha</label>
                     <input type="password" id="nova_senha" name="nova_senha" placeholder="Minimo 10 caracteres" autocomplete="new-password" required>
+                    <button type="button" class="btn-ver-senha" data-alvo="nova_senha">ver</button>
                     <p class="campo-hint">Minimo 10 caracteres e pelo menos 1 numero.</p>
                 </div>
-                <div class="campo">
+                <div class="campo campo-senha">
                     <label for="confirmar_senha">Confirmar nova senha</label>
                     <input type="password" id="confirmar_senha" name="confirmar_senha" placeholder="Repita a nova senha" autocomplete="new-password" required>
+                    <button type="button" class="btn-ver-senha" data-alvo="confirmar_senha">ver</button>
                 </div>
                 <button type="submit" id="btn-salvar">Salvar nova senha</button>
             </form>

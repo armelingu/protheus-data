@@ -92,6 +92,37 @@ body {
     outline: none;
 }
 
+.campo-senha {
+    position: relative;
+}
+
+.campo-senha input {
+    padding-right: 64px;
+}
+
+.btn-ver-senha {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    width: auto;
+    padding: 4px 6px;
+    margin: 0;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    color: #aaaaaa;
+    cursor: pointer;
+}
+
+.btn-ver-senha:hover {
+    color: #1a1a1a;
+    transform: translateY(-50%);
+}
+
 button {
     width: 100%;
     padding: 13px;

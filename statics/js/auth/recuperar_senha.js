@@ -1,5 +1,16 @@
 'use strict';
 
+/* ── Toggle mostrar/ocultar senha ────────────────────────────────────────── */
+document.querySelectorAll('.btn-ver-senha').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+        var input = document.getElementById(btn.dataset.alvo);
+        if (!input) return;
+        var visivel = input.type === 'text';
+        input.type = visivel ? 'password' : 'text';
+        btn.textContent = visivel ? 'ver' : 'ocultar';
+    });
+});
+
 const form          = document.getElementById('recuperar-form');
 const btnSalvar     = document.getElementById('btn-salvar');
 const erroEl        = document.getElementById('erro');
