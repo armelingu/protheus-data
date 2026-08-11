@@ -55,3 +55,4 @@ htmlcov/
 # SSH e segredos locais
 *.pem
 *.key
+challenge.py
