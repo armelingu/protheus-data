@@ -313,10 +313,12 @@ def _detectar_e_remover_deletados(chaves_protheus, data_corte, conn):
         if (r['filial'], r['pedido_compra'], r['item']) not in chaves_protheus
     ]
     if para_deletar:
+        from services.sync_engine import remover_hashes_de_itens
         conn.executemany(
             'DELETE FROM pedidos_detalhado WHERE filial=? AND pedido_compra=? AND item=?',
             para_deletar,
         )
+        remover_hashes_de_itens(conn, 'pedidos_detalhado', para_deletar)
     return len(para_deletar)
 
 

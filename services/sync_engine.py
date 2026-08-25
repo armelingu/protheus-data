@@ -38,6 +38,22 @@ from typing import Callable, Sequence
 
 # ── Hash ──────────────────────────────────────────────────────────────────────
 
+def _chave_item(filial, pedido_compra, item) -> str:
+    return f'{filial}|{pedido_compra}|{item}|'
+
+
+def remover_hashes_de_itens(conn, tabela: str, itens: Sequence[tuple]) -> None:
+    """Apaga o cache de hash dos itens removidos pelo sync incremental."""
+    if not itens:
+        return
+    _garantir_hash_cache(conn)
+    for filial, pedido_compra, item in itens:
+        conn.execute(
+            'DELETE FROM _etl_hash_cache WHERE tabela = ? AND chave LIKE ?',
+            (tabela, _chave_item(filial, pedido_compra, item) + '%'),
+        )
+
+
 def hash_linha(valores: Sequence) -> str:
     """MD5 de todos os valores de uma linha (já normalizados como strings)."""
     conteudo = '|'.join(str(v) if v is not None else '' for v in valores)
@@ -135,7 +151,9 @@ def full_refresh_com_hash(
         chave = '|'.join(str(d[i]) for i in chave_idx)
         h     = hash_linha(d)
         chaves_protheus.add(chave)
-        if hashes_atuais.get(chave) != h:
+        # Hash sozinho não basta: o sync incremental pode ter apagado a linha
+        # e deixado o cache órfão. Sem a linha local, precisa reinserir.
+        if chave not in chaves_locais or hashes_atuais.get(chave) != h:
             para_inserir.append(d)
             novos_hashes[chave] = h
 
