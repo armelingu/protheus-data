@@ -38,6 +38,7 @@ document.addEventListener('DOMContentLoaded', function () {
         'setor_excluido':                   { label: 'Setor excluído',              cat: 'remocao'   },
         'setor_atualizado':                 { label: 'Setor atualizado',            cat: 'edicao'    },
         'gerente_atualizou_permissoes':     { label: 'Permissões ajustadas',        cat: 'edicao'    },
+        'aviso_melhoria_publicado':         { label: 'Aviso de melhoria publicado', cat: 'aviso'     },
         /* acesso */
         'login':                            { label: 'Login realizado',             cat: 'acesso'    },
         'login_primeiro_acesso':            { label: 'Login (primeiro acesso)',      cat: 'acesso'    },
@@ -281,5 +282,6 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     /* ── carga inicial ────────────────────────────────────────────────────── */
+    persistirPaineisAdmin('admin.auditoria.panel.');
     carregarDados();
 });

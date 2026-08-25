@@ -1,0 +1,113 @@
+{% extends "base_auth.html" %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="/statics/css/admin/admin.css">
+{% endblock %}
+
+{% block page_content %}
+<section class="admin-shell">
+    <header class="admin-header">
+        <div class="admin-header-copy">
+            <p class="admin-kicker">Administração</p>
+            <h1>Avisos</h1>
+            <p class="admin-subtitulo">Avise quem tem acesso a um relatório sobre correções e melhorias. O aviso aparece em popup até a confirmação e também é enviado por e-mail.</p>
+        </div>
+        <nav class="admin-tabs" aria-label="Navegação da administração">
+            <a href="/admin/usuarios"  class="admin-tab">Usuários</a>
+            <a href="/admin/setores"   class="admin-tab">Setores</a>
+            <a href="/admin/auditoria" class="admin-tab">Auditoria</a>
+            <a href="/admin/avisos"    class="admin-tab ativo">Avisos</a>
+        </nav>
+    </header>
+
+    <details class="admin-panel admin-panel-collapsible" data-panel="novo-aviso" id="painel-novo-aviso">
+        <summary class="admin-panel-summary">
+            <div>
+                <p class="admin-section-kicker">Publicação</p>
+                <h2>Novo aviso</h2>
+            </div>
+            <div class="admin-panel-summary-side">
+                <p class="admin-panel-texto">Somente usuários ativos com permissão naquele relatório recebem o popup e o e-mail. Quem não tem e-mail cadastrado ainda vê o aviso no sistema.</p>
+                <span class="admin-collapse-chevron" aria-hidden="true">
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                        <path d="M2 4l4 4 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </span>
+            </div>
+        </summary>
+
+        <div class="admin-panel-body">
+        <form id="form-criar-aviso" class="admin-create-form">
+            <label class="admin-field">
+                <span>Relatório</span>
+                <select name="chave" id="aviso-relatorio" required>
+                    <option value="">Selecione o relatório</option>
+                </select>
+            </label>
+            <label class="admin-field">
+                <span>Versão</span>
+                <input type="text" name="versao" maxlength="20" required
+                       placeholder="Ex.: 1.0" value="1.0">
+            </label>
+            <label class="admin-field">
+                <span>Título</span>
+                <input type="text" name="titulo" maxlength="140" required
+                       placeholder="Ex.: Nova coluna de revisão nos pedidos">
+            </label>
+            <label class="admin-field">
+                <span>Mensagem</span>
+                <textarea name="mensagem" maxlength="4000" required
+                          placeholder="Descreva a correção ou melhoria de forma objetiva."></textarea>
+                <small class="admin-field-hint">O texto aparece no popup e no e-mail. Evite dados sensíveis.</small>
+            </label>
+            <div class="admin-create-footer">
+                <button type="submit" class="admin-btn admin-btn-primario" id="btn-publicar-aviso">Publicar aviso</button>
+            </div>
+        </form>
+        </div>
+    </details>
+
+    <details class="admin-panel admin-panel-collapsible" data-panel="avisos-lista" id="painel-avisos-lista" open>
+        <summary class="admin-panel-summary">
+            <div>
+                <p class="admin-section-kicker">Histórico</p>
+                <h2>Avisos publicados <span class="admin-panel-count" id="contador-avisos"></span></h2>
+            </div>
+            <div class="admin-panel-summary-side">
+                <p class="admin-panel-texto">Os totais de e-mail podem levar alguns segundos para atualizar após a publicação.</p>
+                <span class="admin-collapse-chevron" aria-hidden="true">
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                        <path d="M2 4l4 4 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </span>
+            </div>
+        </summary>
+
+        <div class="admin-panel-body">
+        <div class="admin-table">
+            <div class="aviso-lista-head">
+                <span>Relatório</span>
+                <span>Aviso</span>
+                <span>E-mails</span>
+                <span>Publicado</span>
+            </div>
+            <div id="lista-avisos" class="admin-table-body">
+                <p class="admin-vazio">Carregando avisos...</p>
+            </div>
+        </div>
+        <div class="admin-paginacao" id="paginacao-avisos"></div>
+        </div>
+    </details>
+</section>
+
+<div class="toast-area" aria-live="polite" aria-atomic="true">
+    <div class="mensagem" id="mensagem"></div>
+</div>
+
+<script type="application/json" id="admin-relatorios-catalogo">{{ relatorios_catalogo|tojson }}</script>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/statics/js/admin/paineis.js"></script>
+<script src="/statics/js/admin/avisos.js"></script>
+{% endblock %}

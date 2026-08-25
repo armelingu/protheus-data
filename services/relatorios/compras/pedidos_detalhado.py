@@ -41,7 +41,7 @@ SYNC_LOOKBACK_DAYS = _lookback()
 
 # ── Compradores (mesmo filtro do relatório padrão) ────────────────────────────
 
-USUARIOS = "('000331', '000189', '000433', '000341', '000430', '000442', '000373', '000286', '000421')"
+USUARIOS = "('000331', '000189', '000433', '000341', '000430', '000442', '000373', '000286', '000421', '000514', '000520', '000521')"
 
 # ── Colunas ───────────────────────────────────────────────────────────────────
 
@@ -51,7 +51,7 @@ COLUNAS = [
     'PRECO_TOTAL', 'DATA_ENTREGA', 'NUMERO_SC', 'ITEM_SC',
     'OBSERVACOES', 'CLASSE_VALOR', 'QTD_ENTREGUE', 'NUM_COTACAO',
     'MOEDA', 'COD_FORNECEDOR', 'FORNECEDOR', 'DEPOSITO_ESTOQUE',
-    'DATA_EMISSAO', 'NIVEL_APROVACAO', 'APROVADOR', 'DATA_APROVACAO',
+    'DATA_EMISSAO', 'REVISAO', 'NIVEL_APROVACAO', 'APROVADOR', 'DATA_APROVACAO',
     'STATUS_APROVACAO',
     # ── novas colunas ──
     'CENTRO_CUSTO', 'CENTRO_CUSTO_DESC',
@@ -86,6 +86,7 @@ SELECT
     SA2.A2_NOME       AS FORNECEDOR,
     SC7.C7_LOCAL      AS DEPOSITO_ESTOQUE,
     SC7.C7_EMISSAO    AS DATA_EMISSAO,
+    RTRIM(SC7.C7_XREVISA) AS REVISAO,
     APR.CR_NIVEL      AS NIVEL_APROVACAO,
     APRUSR.AK_NOME    AS APROVADOR,
     CONVERT(VARCHAR, APR.CR_DATALIB, 103) AS DATA_APROVACAO,
@@ -155,7 +156,7 @@ SELECT_DETALHADO = (
     'descricao_produto, quantidade, preco_unitario, preco_total, '
     'data_entrega, numero_sc, item_sc, observacoes, classe_valor, '
     'qtd_entregue, num_cotacao, moeda, cod_fornecedor, fornecedor, '
-    'deposito_estoque, data_emissao, nivel_aprovacao, aprovador, '
+    'deposito_estoque, data_emissao, revisao, nivel_aprovacao, aprovador, '
     'data_aprovacao, status_aprovacao, '
     'centro_custo, centro_custo_desc, '
     'item_conta, item_conta_desc, '
@@ -189,13 +190,13 @@ INSERT_DETALHADO = '''
      descricao_produto, quantidade, preco_unitario, preco_total,
      data_entrega, numero_sc, item_sc, observacoes, classe_valor,
      qtd_entregue, num_cotacao, moeda, cod_fornecedor, fornecedor,
-     deposito_estoque, data_emissao, nivel_aprovacao, aprovador,
+     deposito_estoque, data_emissao, revisao, nivel_aprovacao, aprovador,
      data_aprovacao, status_aprovacao,
      centro_custo, centro_custo_desc,
      item_conta, item_conta_desc,
      conta_contabil, conta_contabil_desc,
      cond_pagamento, cond_pagamento_desc)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
             ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(filial, pedido_compra, item, nivel_aprovacao) DO UPDATE SET
         usuario           = excluded.usuario,
@@ -217,6 +218,7 @@ INSERT_DETALHADO = '''
         fornecedor        = excluded.fornecedor,
         deposito_estoque  = excluded.deposito_estoque,
         data_emissao      = excluded.data_emissao,
+        revisao           = excluded.revisao,
         aprovador         = excluded.aprovador,
         data_aprovacao    = excluded.data_aprovacao,
         status_aprovacao  = excluded.status_aprovacao,
@@ -277,7 +279,7 @@ def _norm(v):
     return str(v).strip() if v is not None else ''
 
 
-KEY_IDX = (1, 2, 3, 22)  # FILIAL, PEDIDO_COMPRA, ITEM, NIVEL_APROVACAO
+KEY_IDX = (1, 2, 3, 23)  # FILIAL, PEDIDO_COMPRA, ITEM, NIVEL_APROVACAO
 
 
 def _contar_mutacoes(conn, dados, data_corte):
@@ -292,7 +294,7 @@ def _contar_mutacoes(conn, dados, data_corte):
     }
     novos = atualizados = 0
     for d in dados:
-        key = (d[1], d[2], d[3], d[22])
+        key = (d[1], d[2], d[3], d[23])
         if key not in locais_by_key:
             novos += 1
         elif locais_by_key[key] != tuple(_norm(v) for v in d):
@@ -380,7 +382,7 @@ def carga_completa() -> int:
     return full_refresh_com_hash(
         tabela         = 'pedidos_detalhado',
         chave_colunas  = ['filial', 'pedido_compra', 'item', 'nivel_aprovacao'],
-        chave_idx      = (1, 2, 3, 22),
+        chave_idx      = (1, 2, 3, 23),
         conn_fn        = conectar_pedidos,
         query_completa = QUERY_COMPLETA,
         insert_sql     = INSERT_DETALHADO,

@@ -1,10 +1,15 @@
 document.addEventListener('DOMContentLoaded', function() {
     var formCriar      = document.getElementById('form-criar-setor');
     var listaSetores   = document.getElementById('lista-setores');
+    var paginacaoEl    = document.getElementById('paginacao-setores');
+    var contadorEl     = document.getElementById('contador-setores');
     var mensagem       = document.getElementById('mensagem');
     var novoPerms      = document.getElementById('novo-setor-permissoes');
     var catalogo       = JSON.parse(document.getElementById('admin-relatorios-catalogo').textContent || '[]');
     var mensagemTimeout = null;
+    var setoresCache    = [];
+    var paginaAtual     = 1;
+    var POR_PAGINA      = 10;
 
     function verificarAuth(resp) {
         if (resp.status === 401) {
@@ -119,11 +124,27 @@ document.addEventListener('DOMContentLoaded', function() {
         }).join('');
     }
 
+    function renderizarPagina() {
+        var total = setoresCache.length;
+        var totalPaginas = Math.max(1, Math.ceil(total / POR_PAGINA) || 1);
+        if (paginaAtual > totalPaginas) paginaAtual = totalPaginas;
+        if (paginaAtual < 1) paginaAtual = 1;
+        var inicio = (paginaAtual - 1) * POR_PAGINA;
+        renderizarSetores(setoresCache.slice(inicio, inicio + POR_PAGINA));
+        renderizarPaginacaoAdmin(paginacaoEl, paginaAtual, total, POR_PAGINA, 'setores');
+        if (contadorEl) contadorEl.textContent = total ? '(' + total + ')' : '';
+    }
+
     function carregarDados() {
         mostrarMensagem('Carregando setores...', 'processando');
         return fetch('/api/admin/setores')
             .then(function(r) { if (!verificarAuth(r)) return null; return r.json().then(function(d) { if (!r.ok) throw new Error(d.erro); return d; }); })
-            .then(function(d) { renderizarSetores(d.setores || []); mostrarMensagem('Setores carregados.', 'sucesso'); })
+            .then(function(d) {
+                if (!d) return;
+                setoresCache = d.setores || [];
+                renderizarPagina();
+                mostrarMensagem('Setores carregados.', 'sucesso');
+            })
             .catch(function(e) { mostrarMensagem(e.message || 'Falha ao carregar setores.', 'erro'); });
     }
 
@@ -146,6 +167,9 @@ document.addEventListener('DOMContentLoaded', function() {
             formCriar.reset();
             novoPerms.innerHTML = montarPermissoesHtml('permissoes', []);
             mostrarMensagem(d.mensagem || 'Setor criado.', 'sucesso');
+            var painelNovo = document.getElementById('painel-novo-setor');
+            if (painelNovo) painelNovo.open = false;
+            paginaAtual = 1;
             return carregarDados();
         })
         .catch(function(e) { mostrarMensagem(e.message || 'Falha ao criar setor.', 'erro'); });
@@ -186,5 +210,16 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
+    persistirPaineisAdmin('admin.setores.panel.');
+    if (paginacaoEl) {
+        paginacaoEl.addEventListener('click', function(event) {
+            var btn = event.target.closest('[data-pag]');
+            if (!btn || btn.disabled) return;
+            paginaAtual = lerPaginaPaginacao(btn, paginaAtual);
+            renderizarPagina();
+            var listaPainel = document.getElementById('painel-setores-lista');
+            if (listaPainel) listaPainel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+    }
     carregarDados();
 });

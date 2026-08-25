@@ -12,6 +12,7 @@ Permissão necessária no Entra:
 """
 from __future__ import annotations
 
+import html
 import os
 import time
 
@@ -384,6 +385,139 @@ def montar_email_recuperacao_senha(
         'body':    corpo_texto,
         'html':    corpo_html,
         'url':     reset_url,
+    }
+
+
+# ─── Montagem do e-mail de aviso de melhoria ─────────────────────────────────
+
+def montar_email_aviso_melhoria(
+    nome: str,
+    email_destino: str,
+    modulo_titulo: str,
+    relatorio_titulo: str,
+    titulo: str,
+    mensagem: str,
+    relatorio_url: str,
+    versao: str = '',
+) -> dict:
+    primeiro_nome = nome.split()[0] if nome else nome
+    versao_txt = f' (v{versao})' if versao else ''
+    assunto = f'Atualização no relatório {relatorio_titulo}{versao_txt} — ProtheusData'
+
+    versao_linha = f'Versão {versao}\n\n' if versao else ''
+    corpo_texto = (
+        f'Olá, {primeiro_nome}.\n\n'
+        f'O relatório {modulo_titulo} / {relatorio_titulo} recebeu uma atualização.\n\n'
+        f'{versao_linha}'
+        f'{titulo}\n\n'
+        f'{mensagem}\n\n'
+        f'Abrir o relatório: {relatorio_url}\n\n'
+        '---\n'
+        'Este é um e-mail automático. Não responda esta mensagem.\n'
+        f'Em caso de dúvidas, abra um chamado em: {CHAMADOS_URL}\n'
+    )
+
+    nome_esc = html.escape(primeiro_nome or '')
+    modulo_esc = html.escape(modulo_titulo or '')
+    relatorio_esc = html.escape(relatorio_titulo or '')
+    titulo_esc = html.escape(titulo or '')
+    mensagem_esc = html.escape(mensagem or '').replace('\n', '<br>\n')
+    url_esc = html.escape(relatorio_url or '')
+    versao_esc = html.escape(versao or '')
+    versao_html = (
+        f'<p style="margin:0 0 16px;color:#888888;font-size:10px;font-weight:700;'
+        f'letter-spacing:0.8px;text-transform:uppercase;">Versão {versao_esc}</p>'
+        if versao else ''
+    )
+    header_sub = f'Atualização de relatório{versao_txt}'
+
+    corpo_html = f"""<!DOCTYPE html>
+<html lang="pt-BR">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f4f4f4;font-family:Arial,Helvetica,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f4;padding:32px 16px;">
+    <tr><td align="center">
+      <table width="100%" cellpadding="0" cellspacing="0"
+             style="max-width:560px;background:#ffffff;border:1px solid #e0e0e0;">
+
+        <tr>
+          <td style="background:#1a1a1a;padding:28px 32px;">
+            <p style="margin:0;color:#ffffff;font-size:11px;font-weight:700;
+                      letter-spacing:2px;text-transform:uppercase;">ProtheusData</p>
+            <p style="margin:6px 0 0;color:#cccccc;font-size:13px;">
+              {header_sub}
+            </p>
+          </td>
+        </tr>
+
+        <tr>
+          <td style="padding:32px;">
+            <p style="margin:0 0 18px;color:#1a1a1a;font-size:15px;line-height:1.5;">
+              Olá, {nome_esc}.
+            </p>
+            <p style="margin:0 0 8px;color:#888888;font-size:10px;font-weight:700;
+                      letter-spacing:0.8px;text-transform:uppercase;">
+              {modulo_esc}
+            </p>
+            <p style="margin:0 0 8px;color:#1a1a1a;font-size:16px;font-weight:600;">
+              {relatorio_esc}
+            </p>
+            {versao_html}
+            <p style="margin:0 0 12px;color:#1a1a1a;font-size:14px;font-weight:600;">
+              {titulo_esc}
+            </p>
+            <p style="margin:0 0 28px;color:#555555;font-size:13px;line-height:1.7;">
+              {mensagem_esc}
+            </p>
+
+            <table cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
+              <tr>
+                <td style="background:#1a1a1a;">
+                  <a href="{url_esc}"
+                     style="display:inline-block;padding:14px 28px;
+                            color:#ffffff;font-size:12px;font-weight:700;
+                            letter-spacing:1px;text-transform:uppercase;
+                            text-decoration:none;">
+                    Abrir relatório →
+                  </a>
+                </td>
+              </tr>
+            </table>
+
+            <p style="margin:0;color:#9a9a9a;font-size:11px;line-height:1.6;">
+              Se o botão não funcionar, copie e cole este endereço no navegador:<br>
+              <a href="{url_esc}" style="color:#555555;word-break:break-all;">{url_esc}</a>
+            </p>
+          </td>
+        </tr>
+
+        <tr>
+          <td style="padding:18px 32px 24px;border-top:1px solid #f0f0f0;background:#fafafa;">
+            <p style="margin:0 0 6px;color:#9a9a9a;font-size:11px;">
+              Precisa de ajuda?
+              <a href="{CHAMADOS_URL}"
+                 style="color:#1a1a1a;font-size:11px;font-weight:700;">
+                Yellow Tickets →
+              </a>
+            </p>
+            <p style="margin:0;color:#bbbbbb;font-size:10px;">
+              ProtheusData · Mensagem automática
+            </p>
+          </td>
+        </tr>
+
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>"""
+
+    return {
+        'to':      email_destino,
+        'subject': assunto,
+        'body':    corpo_texto,
+        'html':    corpo_html,
+        'url':     relatorio_url,
     }
 
 

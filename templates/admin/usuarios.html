@@ -16,19 +16,28 @@
             <a href="/admin/usuarios"  class="admin-tab ativo">Usuários</a>
             <a href="/admin/setores"   class="admin-tab">Setores</a>
             <a href="/admin/auditoria" class="admin-tab">Auditoria</a>
+            <a href="/admin/avisos"    class="admin-tab">Avisos</a>
         </nav>
     </header>
 
     <!-- Criar usuário -->
-    <section class="admin-panel admin-panel-create">
-        <div class="admin-panel-top">
+    <details class="admin-panel admin-panel-collapsible" data-panel="novo-usuario" id="painel-novo-usuario">
+        <summary class="admin-panel-summary">
             <div>
                 <p class="admin-section-kicker">Cadastro</p>
                 <h2>Novo usuário</h2>
             </div>
-            <p class="admin-panel-texto">A senha inicial será igual ao login. A troca será obrigatória no primeiro acesso.</p>
-        </div>
+            <div class="admin-panel-summary-side">
+                <p class="admin-panel-texto">A senha inicial será igual ao login. A troca será obrigatória no primeiro acesso.</p>
+                <span class="admin-collapse-chevron" aria-hidden="true">
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                        <path d="M2 4l4 4 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </span>
+            </div>
+        </summary>
 
+        <div class="admin-panel-body">
         <form id="form-criar-usuario" class="admin-create-form">
             <div class="admin-create-row">
                 <label class="admin-field">
@@ -79,18 +88,27 @@
                 <button type="submit" class="admin-btn admin-btn-primario">Criar usuário</button>
             </div>
         </form>
-    </section>
+        </div>
+    </details>
 
     <!-- Lista de usuários -->
-    <section class="admin-panel">
-        <div class="admin-panel-top">
+    <details class="admin-panel admin-panel-collapsible" data-panel="usuarios-lista" id="painel-usuarios-lista" open>
+        <summary class="admin-panel-summary">
             <div>
                 <p class="admin-section-kicker">Operação</p>
-                <h2>Usuários cadastrados</h2>
+                <h2>Usuários cadastrados <span class="admin-panel-count" id="contador-usuarios"></span></h2>
             </div>
-            <p class="admin-panel-texto">Clique em "Editar" para abrir o painel de configuração de cada usuário.</p>
-        </div>
+            <div class="admin-panel-summary-side">
+                <p class="admin-panel-texto">Clique em "Editar" para abrir o painel de configuração de cada usuário.</p>
+                <span class="admin-collapse-chevron" aria-hidden="true">
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                        <path d="M2 4l4 4 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </span>
+            </div>
+        </summary>
 
+        <div class="admin-panel-body">
         <div class="admin-table">
             <div class="admin-table-head">
                 <span>Usuário</span>
@@ -103,7 +121,9 @@
                 <p class="admin-vazio">Carregando usuários...</p>
             </div>
         </div>
-    </section>
+        <div class="admin-paginacao" id="paginacao-usuarios"></div>
+        </div>
+    </details>
 </section>
 
 <div class="toast-area" aria-live="polite" aria-atomic="true">
@@ -115,5 +135,6 @@
 {% endblock %}
 
 {% block extra_scripts %}
+<script src="/statics/js/admin/paineis.js"></script>
 <script src="/statics/js/admin/usuarios.js"></script>
 {% endblock %}
