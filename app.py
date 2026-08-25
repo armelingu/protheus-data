@@ -139,7 +139,16 @@ from services.relatorios.financeiro.mov_bancarios import (
     sincronizar_mov_bancarios, carga_inicial_mov_bancarios,
     QUERY_PAGINADA as QUERY_MOV_BANCARIOS,
 )
-from services.email_service import montar_email_acesso, montar_email_recuperacao_senha, enviar_email
+from services.email_service import montar_email_acesso, montar_email_recuperacao_senha, montar_email_aviso_melhoria, enviar_email, configuracao_email
+from services.avisos_melhoria import (
+    criar_aviso,
+    obter_aviso,
+    listar_avisos_admin,
+    listar_avisos_nao_lidos,
+    listar_usuarios_ativos,
+    marcar_aviso_lido,
+    atualizar_envio_emails,
+)
 from services.time_utils import APP_TIMEZONE, agora_sp, parse_db_datetime
 
 load_dotenv()
@@ -1555,6 +1564,16 @@ def pagina_admin_auditoria():
     )
 
 
+@app.route('/admin/avisos')
+@admin_requerido
+def pagina_admin_avisos():
+    return render_template(
+        'admin/avisos.html',
+        relatorios_catalogo=obter_relatorios_catalogo(),
+        **contexto_auth('ProtheusData - Avisos')
+    )
+
+
 @app.route('/gerente')
 @gerente_requerido
 def pagina_gerente():
@@ -2844,6 +2863,213 @@ def api_admin_configurar_setor(setor_id):
     conn.close()
     registrar_auditoria_admin('setor_atualizado', detalhe=f'Setor id={setor_id} atualizado.')
     return jsonify({'mensagem': 'Setor atualizado com sucesso.'}), 200
+
+
+def _info_relatorio_aviso(modulo_id, relatorio_id):
+    modulo, relatorio = obter_relatorio(modulo_id, relatorio_id)
+    return {
+        'modulo_titulo': modulo['titulo'] if modulo else modulo_id,
+        'relatorio_titulo': relatorio['titulo'] if relatorio else relatorio_id,
+        'path': relatorio['path'] if relatorio else '/relatorios',
+    }
+
+
+def _destinatarios_email_aviso(modulo_id, relatorio_id, excluir_usuario_id=None):
+    destinatarios = []
+    for usuario in listar_usuarios_ativos():
+        if excluir_usuario_id and usuario['id'] == excluir_usuario_id:
+            continue
+        if not usuario_tem_acesso_relatorio(usuario, modulo_id, relatorio_id):
+            continue
+        email = (usuario.get('email') or '').strip()
+        if not email:
+            continue
+        destinatarios.append({
+            'nome': usuario.get('nome') or usuario.get('usuario') or '',
+            'email': email,
+        })
+    return destinatarios
+
+
+def _enviar_emails_aviso_melhoria(aviso_id, destinatarios, contexto):
+    enviados = 0
+    falhas = 0
+    for dest in destinatarios:
+        try:
+            payload = montar_email_aviso_melhoria(
+                nome=dest['nome'],
+                email_destino=dest['email'],
+                modulo_titulo=contexto['modulo_titulo'],
+                relatorio_titulo=contexto['relatorio_titulo'],
+                titulo=contexto['titulo'],
+                mensagem=contexto['mensagem'],
+                relatorio_url=contexto['relatorio_url'],
+                versao=contexto.get('versao') or '',
+            )
+            resultado = enviar_email(payload)
+            if resultado.get('ok'):
+                enviados += 1
+            else:
+                falhas += 1
+                print(
+                    f'[AVISO] e-mail falhou para {dest["email"]}: '
+                    f'{resultado.get("error")}'
+                )
+        except Exception as exc:
+            falhas += 1
+            print(f'[AVISO] e-mail falhou para {dest.get("email")}: {exc}')
+    atualizar_envio_emails(aviso_id, enviados, falhas)
+    print(
+        f'[AVISO] aviso {aviso_id}: {enviados} e-mail(s) enviado(s), '
+        f'{falhas} falha(s).'
+    )
+
+
+@app.route('/api/admin/avisos', methods=['GET'])
+@admin_requerido
+def api_admin_listar_avisos():
+    avisos = []
+    for aviso in listar_avisos_admin():
+        info = _info_relatorio_aviso(aviso['modulo_id'], aviso['relatorio_id'])
+        avisos.append({
+            **aviso,
+            **info,
+            'chave': chave_relatorio(aviso['modulo_id'], aviso['relatorio_id']),
+        })
+    return jsonify({
+        'avisos': avisos,
+        'relatorios': obter_relatorios_catalogo(),
+    })
+
+
+@app.route('/api/admin/avisos', methods=['POST'])
+@admin_requerido
+def api_admin_criar_aviso():
+    dados = request.get_json() or {}
+    chave = (dados.get('chave') or '').strip()
+    titulo = (dados.get('titulo') or '').strip()
+    mensagem = (dados.get('mensagem') or '').strip()
+    versao = (dados.get('versao') or '').strip()
+
+    if not chave or '.' not in chave:
+        return jsonify({'erro': 'Selecione um relatório válido.'}), 400
+    if not versao:
+        return jsonify({'erro': 'Informe a versão desta atualização.'}), 400
+    if len(versao) > 20:
+        return jsonify({'erro': 'A versão pode ter no máximo 20 caracteres.'}), 400
+    if len(titulo) < 3:
+        return jsonify({'erro': 'Informe um título com pelo menos 3 caracteres.'}), 400
+    if len(titulo) > 140:
+        return jsonify({'erro': 'O título pode ter no máximo 140 caracteres.'}), 400
+    if len(mensagem) < 8:
+        return jsonify({'erro': 'Informe uma mensagem com pelo menos 8 caracteres.'}), 400
+    if len(mensagem) > 4000:
+        return jsonify({'erro': 'A mensagem pode ter no máximo 4000 caracteres.'}), 400
+
+    chaves_validas = {item['chave'] for item in obter_relatorios_catalogo()}
+    if chave not in chaves_validas:
+        return jsonify({'erro': 'Relatório inválido ou inativo.'}), 400
+
+    modulo_id, relatorio_id = chave.split('.', 1)
+    modulo, relatorio = obter_relatorio(modulo_id, relatorio_id)
+    if not modulo or not relatorio:
+        return jsonify({'erro': 'Relatório não encontrado.'}), 400
+
+    admin = usuario_atual()
+    aviso_id = criar_aviso(
+        modulo_id=modulo_id,
+        relatorio_id=relatorio_id,
+        titulo=titulo,
+        mensagem=mensagem,
+        criado_por=admin['id'],
+        versao=versao,
+    )
+
+    info = _info_relatorio_aviso(modulo_id, relatorio_id)
+    relatorio_url = configuracao_email()['app_base_url'] + info['path']
+    destinatarios = _destinatarios_email_aviso(
+        modulo_id, relatorio_id, excluir_usuario_id=admin['id']
+    )
+    contexto = {
+        'modulo_titulo': info['modulo_titulo'],
+        'relatorio_titulo': info['relatorio_titulo'],
+        'titulo': titulo,
+        'mensagem': mensagem,
+        'versao': versao,
+        'relatorio_url': relatorio_url,
+    }
+    thread = threading.Thread(
+        target=_enviar_emails_aviso_melhoria,
+        args=(aviso_id, destinatarios, contexto),
+        daemon=True,
+        name=f'aviso-melhoria-{aviso_id}',
+    )
+    thread.start()
+
+    rotulo = f'{info["modulo_titulo"]} / {info["relatorio_titulo"]}'
+    registrar_auditoria_admin(
+        'aviso_melhoria_publicado',
+        detalhe=(
+            f'Aviso #{aviso_id} (v{versao}) em {rotulo}: {titulo}. '
+            f'E-mail para {len(destinatarios)} usuário(s).'
+        ),
+    )
+
+    if destinatarios:
+        mensagem_ok = (
+            f'Aviso publicado. O popup será exibido para quem tem acesso a '
+            f'{info["relatorio_titulo"]} e o e-mail será enviado para '
+            f'{len(destinatarios)} usuário(s).'
+        )
+    else:
+        mensagem_ok = (
+            f'Aviso publicado. Ninguém além de você tem e-mail cadastrado '
+            f'com acesso a {info["relatorio_titulo"]}; o popup segue valendo '
+            f'para quem acessar o sistema.'
+        )
+
+    return jsonify({
+        'mensagem': mensagem_ok,
+        'id': aviso_id,
+        'emails_previstos': len(destinatarios),
+    }), 201
+
+
+@app.route('/api/avisos/pendentes', methods=['GET'])
+@login_requerido
+def api_avisos_pendentes():
+    usuario = usuario_atual()
+    pendentes = []
+    for aviso in listar_avisos_nao_lidos(usuario['id']):
+        if not usuario_tem_acesso_relatorio(
+            usuario, aviso['modulo_id'], aviso['relatorio_id']
+        ):
+            continue
+        info = _info_relatorio_aviso(aviso['modulo_id'], aviso['relatorio_id'])
+        pendentes.append({
+            'id': aviso['id'],
+            'titulo': aviso['titulo'],
+            'mensagem': aviso['mensagem'],
+            'versao': aviso.get('versao') or '',
+            'criado_em': aviso['criado_em'],
+            **info,
+        })
+    return jsonify({'avisos': pendentes})
+
+
+@app.route('/api/avisos/<int:aviso_id>/lido', methods=['POST'])
+@login_requerido
+def api_avisos_marcar_lido(aviso_id):
+    usuario = usuario_atual()
+    aviso = obter_aviso(aviso_id)
+    if not aviso:
+        return jsonify({'erro': 'Aviso não encontrado.'}), 404
+    if not usuario_tem_acesso_relatorio(
+        usuario, aviso['modulo_id'], aviso['relatorio_id']
+    ):
+        return jsonify({'erro': 'Você não tem acesso a este aviso.'}), 403
+    marcar_aviso_lido(aviso_id, usuario['id'])
+    return jsonify({'ok': True})
 
 
 # ── API Gerente ───────────────────────────────────────────────────────────────

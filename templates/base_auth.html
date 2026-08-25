@@ -61,6 +61,9 @@
                     <a href="/admin/auditoria" class="menu-link{% if current_path == '/admin/auditoria' %} ativo{% endif %}">
                         Auditoria
                     </a>
+                    <a href="/admin/avisos" class="menu-link{% if current_path == '/admin/avisos' %} ativo{% endif %}">
+                        Avisos
+                    </a>
                 </section>
                 {% endif %}
 
@@ -82,7 +85,21 @@
         </main>
     </div>
 
+    <div id="aviso-melhoria-overlay" class="aviso-overlay" hidden>
+        <div class="aviso-card" role="dialog" aria-modal="true" aria-labelledby="aviso-titulo">
+            <p class="aviso-kicker">Atualização de relatório</p>
+            <p class="aviso-versao" hidden></p>
+            <p class="aviso-relatorio"></p>
+            <h2 class="aviso-titulo" id="aviso-titulo"></h2>
+            <p class="aviso-mensagem"></p>
+            <div class="aviso-acoes">
+                <button type="button" class="aviso-btn" id="aviso-ok">Entendi</button>
+            </div>
+        </div>
+    </div>
+
     <script src="/statics/js/relatorios/layout.js"></script>
+    <script src="/statics/js/relatorios/avisos.js"></script>
     {% block extra_scripts %}{% endblock %}
 </body>
 </html>
