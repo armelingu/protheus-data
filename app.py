@@ -1863,6 +1863,7 @@ _ODATA_METADATA_XML = '''<?xml version="1.0" encoding="utf-8"?>
         <Property Name="fornecedor"        Type="Edm.String"/>
         <Property Name="deposito_estoque"  Type="Edm.String"/>
         <Property Name="data_emissao"      Type="Edm.String"/>
+        <Property Name="revisao"           Type="Edm.String"/>
         <Property Name="nivel_aprovacao"   Type="Edm.String" Nullable="false"/>
         <Property Name="aprovador"         Type="Edm.String"/>
         <Property Name="data_aprovacao"    Type="Edm.String"/>
@@ -2116,6 +2117,7 @@ _ODATA_METADATA_XML = '''<?xml version="1.0" encoding="utf-8"?>
         <Property Name="fornecedor"        Type="Edm.String"/>
         <Property Name="deposito_estoque"  Type="Edm.String"/>
         <Property Name="data_emissao"      Type="Edm.String"/>
+        <Property Name="revisao"           Type="Edm.String"/>
         <Property Name="aprovador"         Type="Edm.String"/>
         <Property Name="data_aprovacao"    Type="Edm.String"/>
         <Property Name="status_aprovacao"  Type="Edm.String"/>
@@ -2456,7 +2458,7 @@ _ODATA_PEDIDOS_COLUNAS = [
     'descricao_produto', 'quantidade', 'preco_unitario', 'preco_total',
     'data_entrega', 'numero_sc', 'item_sc', 'observacoes', 'classe_valor',
     'qtd_entregue', 'num_cotacao', 'moeda', 'cod_fornecedor', 'fornecedor',
-    'deposito_estoque', 'data_emissao', 'nivel_aprovacao', 'aprovador',
+    'deposito_estoque', 'data_emissao', 'revisao', 'nivel_aprovacao', 'aprovador',
     'data_aprovacao', 'status_aprovacao',
     'centro_custo', 'centro_custo_desc',
     'item_conta', 'item_conta_desc',
@@ -2485,7 +2487,7 @@ _ODATA_ENERGY_PEDIDOS_COLUNAS = [
     'descricao_produto', 'quantidade', 'preco_unitario', 'preco_total',
     'data_entrega', 'numero_sc', 'item_sc', 'observacoes', 'classe_valor',
     'qtd_entregue', 'num_cotacao', 'moeda', 'cod_fornecedor', 'fornecedor',
-    'deposito_estoque', 'data_emissao', 'aprovador',
+    'deposito_estoque', 'data_emissao', 'revisao', 'aprovador',
     'data_aprovacao', 'status_aprovacao',
 ]
 

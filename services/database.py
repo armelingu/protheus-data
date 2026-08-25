@@ -564,6 +564,7 @@ def criar_tabelas():
             fornecedor TEXT,
             deposito_estoque TEXT,
             data_emissao TEXT,
+            revisao TEXT,
             nivel_aprovacao TEXT NOT NULL DEFAULT '',
             aprovador TEXT,
             data_aprovacao TEXT,
@@ -583,6 +584,7 @@ def criar_tabelas():
         'CREATE INDEX IF NOT EXISTS idx_pedidos_detalhado_emissao '
         'ON pedidos_detalhado(data_emissao)'
     )
+    _garantir_coluna(conn, 'pedidos_detalhado', 'revisao', 'TEXT')
     conn.execute('''
         CREATE TABLE IF NOT EXISTS pedidos_detalhado_sync_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -678,6 +680,7 @@ def criar_tabelas():
             fornecedor TEXT,
             deposito_estoque TEXT,
             data_emissao TEXT,
+            revisao TEXT,
             aprovador TEXT,
             data_aprovacao TEXT,
             status_aprovacao TEXT,
@@ -688,6 +691,7 @@ def criar_tabelas():
         'CREATE INDEX IF NOT EXISTS idx_pedidos_conta_05001_emissao '
         'ON pedidos_conta_05001(data_emissao)'
     )
+    _garantir_coluna(conn, 'pedidos_conta_05001', 'revisao', 'TEXT')
     conn.execute('''
         CREATE TABLE IF NOT EXISTS pedidos_conta_05001_sync_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
