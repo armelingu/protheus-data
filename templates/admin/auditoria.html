@@ -15,7 +15,9 @@
 
         <nav class="admin-tabs" aria-label="Navegação da administração">
             <a href="/admin/usuarios" class="admin-tab">Usuários</a>
+            <a href="/admin/setores" class="admin-tab">Setores</a>
             <a href="/admin/auditoria" class="admin-tab ativo">Auditoria</a>
+            <a href="/admin/avisos" class="admin-tab">Avisos</a>
         </nav>
     </header>
 
@@ -44,6 +46,7 @@
                     <option value="setor_criado">Setor criado</option>
                     <option value="setor_excluido">Setor excluído</option>
                     <option value="setor_atualizado">Setor atualizado</option>
+                    <option value="aviso_melhoria_publicado">Aviso de melhoria</option>
                 </optgroup>
                 <optgroup label="Acesso">
                     <option value="login">Login</option>
@@ -74,8 +77,8 @@
     </div>
 
     <!-- Painel: Trilha Administrativa -->
-    <section class="admin-panel">
-        <div class="admin-panel-top">
+    <details class="admin-panel admin-panel-collapsible" data-panel="eventos-admin" id="painel-eventos-admin" open>
+        <summary class="admin-panel-summary">
             <div>
                 <p class="admin-section-kicker">Trilha administrativa</p>
                 <h2>
@@ -83,8 +86,16 @@
                     <span class="audit-contador" id="contador-auditoria"></span>
                 </h2>
             </div>
-            <p class="admin-panel-texto">Criação de usuários, ajustes de permissões, ativações, desativações e redefinições de senha.</p>
-        </div>
+            <div class="admin-panel-summary-side">
+                <p class="admin-panel-texto">Criação de usuários, ajustes de permissões, ativações, desativações e redefinições de senha.</p>
+                <span class="admin-collapse-chevron" aria-hidden="true">
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                        <path d="M2 4l4 4 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </span>
+            </div>
+        </summary>
+        <div class="admin-panel-body">
         <div class="admin-log-table">
             <div class="admin-log-head audit-head-4col">
                 <span>Evento</span>
@@ -97,11 +108,12 @@
             </div>
         </div>
         <div class="audit-paginacao" id="paginacao-auditoria"></div>
-    </section>
+        </div>
+    </details>
 
     <!-- Painel: Eventos de Acesso -->
-    <section class="admin-panel">
-        <div class="admin-panel-top">
+    <details class="admin-panel admin-panel-collapsible" data-panel="eventos-acesso" id="painel-eventos-acesso" open>
+        <summary class="admin-panel-summary">
             <div>
                 <p class="admin-section-kicker">Uso do sistema</p>
                 <h2>
@@ -109,8 +121,16 @@
                     <span class="audit-contador" id="contador-acesso"></span>
                 </h2>
             </div>
-            <p class="admin-panel-texto">Logins, logouts, downloads e sincronizações executadas pelos usuários.</p>
-        </div>
+            <div class="admin-panel-summary-side">
+                <p class="admin-panel-texto">Logins, logouts, downloads e sincronizações executadas pelos usuários.</p>
+                <span class="admin-collapse-chevron" aria-hidden="true">
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                        <path d="M2 4l4 4 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </span>
+            </div>
+        </summary>
+        <div class="admin-panel-body">
         <div class="admin-log-table">
             <div class="admin-log-head audit-head-4col">
                 <span>Ação</span>
@@ -123,7 +143,8 @@
             </div>
         </div>
         <div class="audit-paginacao" id="paginacao-acesso"></div>
-    </section>
+        </div>
+    </details>
 </section>
 
 <div class="toast-area" aria-live="polite" aria-atomic="true">
@@ -132,5 +153,6 @@
 {% endblock %}
 
 {% block extra_scripts %}
+<script src="/statics/js/admin/paineis.js"></script>
 <script src="/statics/js/admin/auditoria.js"></script>
 {% endblock %}

@@ -16,19 +16,28 @@
             <a href="/admin/usuarios"  class="admin-tab">Usuários</a>
             <a href="/admin/setores"   class="admin-tab ativo">Setores</a>
             <a href="/admin/auditoria" class="admin-tab">Auditoria</a>
+            <a href="/admin/avisos"    class="admin-tab">Avisos</a>
         </nav>
     </header>
 
     <!-- Criar setor -->
-    <section class="admin-panel">
-        <div class="admin-panel-top">
+    <details class="admin-panel admin-panel-collapsible" data-panel="novo-setor" id="painel-novo-setor">
+        <summary class="admin-panel-summary">
             <div>
                 <p class="admin-section-kicker">Cadastro</p>
                 <h2>Novo setor</h2>
             </div>
-            <p class="admin-panel-texto">Defina o nome, uma descrição e quais módulos/relatórios o setor pode acessar.</p>
-        </div>
+            <div class="admin-panel-summary-side">
+                <p class="admin-panel-texto">Defina o nome, uma descrição e quais módulos/relatórios o setor pode acessar.</p>
+                <span class="admin-collapse-chevron" aria-hidden="true">
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                        <path d="M2 4l4 4 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </span>
+            </div>
+        </summary>
 
+        <div class="admin-panel-body">
         <form id="form-criar-setor" class="admin-create-form">
             <div class="admin-create-row">
                 <label class="admin-field">
@@ -52,18 +61,27 @@
                 <button type="submit" class="admin-btn admin-btn-primario">Criar setor</button>
             </div>
         </form>
-    </section>
+        </div>
+    </details>
 
     <!-- Lista de setores -->
-    <section class="admin-panel">
-        <div class="admin-panel-top">
+    <details class="admin-panel admin-panel-collapsible" data-panel="setores-lista" id="painel-setores-lista" open>
+        <summary class="admin-panel-summary">
             <div>
                 <p class="admin-section-kicker">Operação</p>
-                <h2>Setores cadastrados</h2>
+                <h2>Setores cadastrados <span class="admin-panel-count" id="contador-setores"></span></h2>
             </div>
-            <p class="admin-panel-texto">Clique em "Editar" para ajustar módulos e descrição de cada setor.</p>
-        </div>
+            <div class="admin-panel-summary-side">
+                <p class="admin-panel-texto">Clique em "Editar" para ajustar módulos e descrição de cada setor.</p>
+                <span class="admin-collapse-chevron" aria-hidden="true">
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                        <path d="M2 4l4 4 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </span>
+            </div>
+        </summary>
 
+        <div class="admin-panel-body">
         <div class="admin-table">
             <div class="admin-table-head" style="grid-template-columns: minmax(160px,1.2fr) minmax(0,1.5fr) 80px 80px 90px;">
                 <span>Setor</span>
@@ -76,7 +94,9 @@
                 <p class="admin-vazio">Carregando setores...</p>
             </div>
         </div>
-    </section>
+        <div class="admin-paginacao" id="paginacao-setores"></div>
+        </div>
+    </details>
 </section>
 
 <div class="toast-area" aria-live="polite" aria-atomic="true">
@@ -87,5 +107,6 @@
 {% endblock %}
 
 {% block extra_scripts %}
+<script src="/statics/js/admin/paineis.js"></script>
 <script src="/statics/js/admin/setores.js"></script>
 {% endblock %}
