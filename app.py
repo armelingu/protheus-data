@@ -119,13 +119,13 @@ from services.relatorios.energy.contas_pagar import (
     gerar_csv_energy_contas_pagar, gerar_excel_energy_contas_pagar,
     info_relatorio_energy_contas_pagar, historico_sync_energy_contas_pagar,
     sincronizar_energy_contas_pagar, carga_inicial_energy_contas_pagar,
-    QUERY_PAGINADA as QUERY_ENERGY_CONTAS_PAGAR,
+    QUERY_PREVIEW as QUERY_ENERGY_CONTAS_PAGAR,
 )
 from services.relatorios.energy.nf_saida import (
     gerar_csv_energy_nf_saida, gerar_excel_energy_nf_saida,
     info_relatorio_energy_nf_saida, historico_sync_energy_nf_saida,
     sincronizar_energy_nf_saida, carga_inicial_energy_nf_saida,
-    QUERY_PAGINADA as QUERY_ENERGY_NF_SAIDA,
+    QUERY_PREVIEW as QUERY_ENERGY_NF_SAIDA,
 )
 from services.relatorios.financeiro.contas_pagar import (
     gerar_csv_contas_pagar, gerar_excel_contas_pagar,

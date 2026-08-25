@@ -6,7 +6,7 @@ Estrutura idêntica ao relatório financeiro/contas_receber, com a adição
 do filtro de negócio e tabelas/cursores próprios para evitar colisão.
 """
 from services.relatorios.financeiro.base import (
-    DATA_INICIO, BATCH_SIZE, _s, _f,
+    DATA_INICIO, _s, _f,
     _lookback_dias,
     carga_inicial, sincronizar, info_relatorio, historico_sync,
     gerar_csv, gerar_excel, construir_upsert_sql,
@@ -51,13 +51,25 @@ _CAMPOS = """
     RTRIM(E1_NUMNOTA), RTRIM(E1_SERIE),   RTRIM(E1_MOTIVO),
     RTRIM(E1_ITEMC)"""
 
-QUERY_PAGINADA = f"""
-SELECT TOP {BATCH_SIZE}
+_FILTRO_BASE = (
+    "D_E_L_E_T_ = ' ' "
+    f"AND RTRIM(E1_ITEMC) = '{ITEMC_ENERGY}' "
+    f"AND E1_VENCTO >= '{DATA_INICIO}'"
+)
+
+QUERY_PREVIEW = f"""
+SELECT
     R_E_C_N_O_,{_CAMPOS}
 FROM SE1010 WITH (NOLOCK)
-WHERE D_E_L_E_T_ = ' '
-  AND RTRIM(E1_ITEMC) = '{ITEMC_ENERGY}'
-  AND E1_VENCTO >= '{DATA_INICIO}'
+WHERE {_FILTRO_BASE}
+ORDER BY R_E_C_N_O_
+"""
+
+QUERY_PAGINADA = f"""
+SELECT
+    R_E_C_N_O_,{_CAMPOS}
+FROM SE1010 WITH (NOLOCK)
+WHERE {_FILTRO_BASE}
   AND R_E_C_N_O_ > ?
 ORDER BY R_E_C_N_O_
 """

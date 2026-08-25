@@ -10,7 +10,7 @@ A query no Protheus já vem com aliases (SELECT E2_FILIAL AS Filial, ...) e a
 tabela local em financeiro.db espelha esses nomes.
 """
 from services.relatorios.financeiro.base import (
-    DATA_INICIO, BATCH_SIZE, _s, _f,
+    DATA_INICIO, _s, _f,
     _lookback_dias,
     carga_inicial, sincronizar, info_relatorio, historico_sync,
     gerar_csv, gerar_excel, construir_upsert_sql,
@@ -90,17 +90,30 @@ _CAMPOS = """
 
 # Filtro do negócio Energy (sempre aplicado)
 _FILTRO_ENERGY = (
-    "AND E2_ITEMD = '" + ITEMD_ENERGY + "' "
+    "AND RTRIM(E2_ITEMD) = '" + ITEMD_ENERGY + "' "
     "AND E2_NATUREZ NOT IN (" + ", ".join("'" + n + "'" for n in NATUREZAS_EXCLUIDAS) + ")"
 )
 
-QUERY_PAGINADA = f"""
-SELECT TOP {BATCH_SIZE}
+# Carga, preview e exportação usam vencimento — o mesmo campo do sync incremental.
+_FILTRO_BASE = (
+    "D_E_L_E_T_ = ' ' "
+    f"{_FILTRO_ENERGY} "
+    f"AND E2_VENCTO >= '{DATA_INICIO}'"
+)
+
+QUERY_PREVIEW = f"""
+SELECT
     R_E_C_N_O_ AS recno,{_CAMPOS}
 FROM SE2010 WITH (NOLOCK)
-WHERE D_E_L_E_T_ = ' '
-  AND E2_EMISSAO >= '{DATA_INICIO}'
-  {_FILTRO_ENERGY}
+WHERE {_FILTRO_BASE}
+ORDER BY R_E_C_N_O_
+"""
+
+QUERY_PAGINADA = f"""
+SELECT
+    R_E_C_N_O_ AS recno,{_CAMPOS}
+FROM SE2010 WITH (NOLOCK)
+WHERE {_FILTRO_BASE}
   AND R_E_C_N_O_ > ?
 ORDER BY R_E_C_N_O_
 """
