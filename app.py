@@ -52,6 +52,7 @@ from services.relatorios.energy.pedidos_conta_05001 import (
     historico_sync as historico_sync_pedidos_conta_05001,
     sincronizar as sincronizar_pedidos_conta_05001,
     carga_inicial as carga_inicial_pedidos_conta_05001,
+    carga_completa as carga_completa_pedidos_conta_05001,
     registrar_sync_event as registrar_sync_event_pedidos_conta_05001,
 )
 from services.relatorios.compras.historico_pedidos import (
@@ -1440,19 +1441,9 @@ def pagina_relatorio_compras_pedidos():
 
 
 @app.route('/relatorios/energy/pedidos')
-@acesso_relatorio_requerido('energy', 'pedidos')
+@login_requerido
 def pagina_relatorio_energy_pedidos():
-    modulo, relatorio = obter_relatorio('energy', 'pedidos')
-    usuario = usuario_atual()
-    pode_ver_query = bool(usuario and usuario['is_admin'] and usuario['pode_ver_query'])
-    return render_template(
-        'relatorios/energy_pedidos.html',
-        modulo_ativo=modulo,
-        relatorio_ativo=relatorio,
-        query_preview=QUERY_PREVIEW_PEDIDOS_ENERGY if pode_ver_query else '',
-        pode_ver_query=pode_ver_query,
-        **contexto_auth('ProtheusData - Pedidos Energy')
-    )
+    return redirect('/relatorios/energy/pedidos-conta-05001')
 
 
 @app.route('/relatorios/energy/pedidos-conta-05001')
@@ -1467,7 +1458,7 @@ def pagina_relatorio_energy_pedidos_conta_05001():
         relatorio_ativo=relatorio,
         query_preview=QUERY_PREVIEW_PEDIDOS_CONTA_05001 if pode_ver_query else '',
         pode_ver_query=pode_ver_query,
-        **contexto_auth('ProtheusData - Pedidos Conta 05.001')
+        **contexto_auth('ProtheusData - Pedidos de Compra Energy')
     )
 
 
@@ -1588,7 +1579,7 @@ def pagina_gerente():
 # (c) URL "pronta para copiar" ao gerar um token.
 ENDPOINTS_POWER_BI = [
     {'chave': 'compras.pedidos_detalhado', 'tag': 'Pedidos',          'titulo': 'Pedidos de Compra',     'url_path': '/odata/pedidos'},
-    {'chave': 'energy.pedidos',          'tag': 'Energy Pedidos',   'titulo': 'Pedidos Energy',        'url_path': '/odata/energy-pedidos'},
+    {'chave': 'energy.pedidos_conta_05001', 'tag': 'Energy Pedidos',   'titulo': 'Pedidos Energy',        'url_path': '/odata/energy-pedidos'},
     {'chave': 'estoque.saldos',          'tag': 'Estoque',          'titulo': 'Saldo em Estoque',      'url_path': '/odata/estoque'},
     {'chave': 'financeiro.nf_entrada',   'tag': 'NF Entrada',       'titulo': 'NF de Entrada',         'url_path': '/odata/nf-entrada'},
     {'chave': 'financeiro.nf_saida',     'tag': 'NF Saída',         'titulo': 'NF de Saída',           'url_path': '/odata/nf-saida'},
@@ -2083,7 +2074,6 @@ _ODATA_METADATA_XML = '''<?xml version="1.0" encoding="utf-8"?>
           <PropertyRef Name="filial"/>
           <PropertyRef Name="pedido_compra"/>
           <PropertyRef Name="item"/>
-          <PropertyRef Name="nivel_aprovacao"/>
         </Key>
         <Property Name="usuario"           Type="Edm.String"/>
         <Property Name="filial"            Type="Edm.String" Nullable="false"/>
@@ -2107,7 +2097,6 @@ _ODATA_METADATA_XML = '''<?xml version="1.0" encoding="utf-8"?>
         <Property Name="fornecedor"        Type="Edm.String"/>
         <Property Name="deposito_estoque"  Type="Edm.String"/>
         <Property Name="data_emissao"      Type="Edm.String"/>
-        <Property Name="nivel_aprovacao"   Type="Edm.String" Nullable="false"/>
         <Property Name="aprovador"         Type="Edm.String"/>
         <Property Name="data_aprovacao"    Type="Edm.String"/>
         <Property Name="status_aprovacao"  Type="Edm.String"/>
@@ -2477,22 +2466,22 @@ _ODATA_ENERGY_PEDIDOS_COLUNAS = [
     'descricao_produto', 'quantidade', 'preco_unitario', 'preco_total',
     'data_entrega', 'numero_sc', 'item_sc', 'observacoes', 'classe_valor',
     'qtd_entregue', 'num_cotacao', 'moeda', 'cod_fornecedor', 'fornecedor',
-    'deposito_estoque', 'data_emissao', 'nivel_aprovacao', 'aprovador',
+    'deposito_estoque', 'data_emissao', 'aprovador',
     'data_aprovacao', 'status_aprovacao',
 ]
 
 
 @app.route('/odata/energy-pedidos')
 def odata_energy_pedidos():
-    _, erro = _autorizar_odata('energy', 'pedidos', 'Pedidos Energy')
+    _, erro = _autorizar_odata('energy', 'pedidos_conta_05001', 'Pedidos Energy')
     if erro:
         return erro
     return _odata_paged_response(
         entity_name='EnergyPedidos',
         conectar_fn=conectar_pedidos,
-        tabela='pedidos_energy',
+        tabela='pedidos_conta_05001',
         colunas=_ODATA_ENERGY_PEDIDOS_COLUNAS,
-        order_by='data_emissao DESC, pedido_compra, item, nivel_aprovacao',
+        order_by='data_emissao DESC, pedido_compra, item',
         url_path='/odata/energy-pedidos',
     )
 
@@ -4688,15 +4677,17 @@ def api_admin_reenviar_email(usuario_id):
 def api_admin_full_refresh():
     """Dispara full refresh de um relatório específico ou de todos (modo admin).
 
-    Body JSON: {"relatorio": "pedidos"} ou {"relatorio": "todos"} para todos.
+    Body JSON: {"relatorio": "pedidos_conta_05001"} ou {"relatorio": "todos"} para todos.
     O job roda em background thread para não bloquear a resposta HTTP.
     """
     dados     = request.get_json() or {}
     relatorio = (dados.get('relatorio') or 'todos').strip().lower()
 
     _MAP_FULL_REFRESH = {
-        'pedidos':            carga_completa_pedidos,
-        'pedidos_detalhado':  carga_completa_pedidos_detalhado,
+        'pedidos':               carga_completa_pedidos,
+        'pedidos_detalhado':     carga_completa_pedidos_detalhado,
+        'pedidos_conta_05001':   carga_completa_pedidos_conta_05001,
+        'energy_pedidos':        carga_completa_pedidos_conta_05001,
     }
 
     def _rodar_em_background(fn, nome):

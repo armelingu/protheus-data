@@ -119,12 +119,12 @@ RELATORIOS_CATALOGO = [
                 'descricao': 'Pedidos de compra (SC7) dos compradores do setor Energy.',
                 'path': '/relatorios/energy/pedidos',
                 'api_base': '/api/relatorios/energy/pedidos',
-                'ativo': True,
+                'ativo': False,
             },
             {
                 'id': 'pedidos_conta_05001',
-                'titulo': 'Pedidos — Conta 05.001',
-                'descricao': 'Todos os pedidos de compra com item contábil 05.001, independente do comprador.',
+                'titulo': 'Pedidos de Compra',
+                'descricao': 'Pedidos com item contábil 05.001 e pedidos dos compradores do setor Energy.',
                 'path': '/relatorios/energy/pedidos-conta-05001',
                 'api_base': '/api/relatorios/energy/pedidos-conta-05001',
                 'ativo': True,
@@ -151,6 +151,8 @@ def chaves_acesso_equivalentes(modulo_id, relatorio_id):
     chave = chave_relatorio(modulo_id, relatorio_id)
     if modulo_id == 'compras' and relatorio_id == 'pedidos_detalhado':
         return {chave, 'compras.pedidos'}
+    if modulo_id == 'energy' and relatorio_id == 'pedidos_conta_05001':
+        return {chave, 'energy.pedidos'}
     return {chave}
 
 

@@ -1,16 +1,17 @@
 """
-Pedidos de Compra — Conta Contábil 05.001 (Energy, escopo amplo).
+Pedidos de Compra — Energy.
 
-Diferente de services/relatorios/energy/pedidos.py:
-  - Não há filtro de comprador (C7_USER): retorna TODOS os pedidos cuja
-    conta contábil (C7_ITEMCTA) seja '05.001', independentemente de quem criou.
-  - Não há coluna nivel_aprovacao: usa OUTER APPLY para consolidar a aprovação
-    em uma única linha por (filial, pedido_compra, item), trazendo:
-      • o nível pendente de menor ordem, se houver algum aguardando aprovação;
-      • ou o último nível aprovado, se todos já foram aprovados.
-  - UNIQUE: (filial, pedido_compra, item).
-  - Histórico completo desde o início (carga_inicial sem janela de data);
-    sincronização incremental usa lookback normal.
+União de dois recortes:
+  - todos os pedidos com item contábil 05.001, independente do comprador;
+  - todos os pedidos dos compradores do setor Energy, mesmo fora do 05.001.
+
+Não há coluna nivel_aprovacao: usa OUTER APPLY para consolidar a aprovação
+em uma única linha por (filial, pedido_compra, item), trazendo:
+  • o nível pendente de menor ordem, se houver algum aguardando aprovação;
+  • ou o último nível aprovado, se todos já foram aprovados.
+UNIQUE: (filial, pedido_compra, item).
+Histórico completo desde o início (carga_inicial sem janela de data);
+sincronização incremental usa lookback normal.
 """
 import csv
 import io
@@ -21,7 +22,7 @@ from dotenv import load_dotenv
 
 from services.database import conectar_pedidos, agora
 from services.protheus_readonly import executar_select
-from services.time_utils import format_protheus_date, parse_protheus_date
+from services.relatorios.energy.pedidos import USUARIOS_ENERGY
 
 load_dotenv()
 
@@ -52,7 +53,7 @@ COLUNAS = [
 # OUTER APPLY traz a aprovação mais relevante por item:
 #   1º prioridade — nível pendente (status 01/02) de menor ordem;
 #   2º prioridade — nível aprovado mais alto, quando tudo foi aprovado.
-# Sem filtro de C7_USER: abrange todos os compradores da empresa.
+# Escopo: item 05.001 (qualquer comprador) OU pedidos dos compradores Energy.
 _QUERY_BASE = f"""
 SELECT
     USR.USR_NOME      AS USUARIO,
@@ -113,7 +114,10 @@ OUTER APPLY (
         APR.CR_NIVEL ASC
 ) APR_REL
 WHERE SC7.D_E_L_E_T_ = ''
-  AND SC7.C7_ITEMCTA  = '{ITEM_CONTABIL}'
+  AND (
+        SC7.C7_ITEMCTA = '{ITEM_CONTABIL}'
+     OR SC7.C7_USER IN {USUARIOS_ENERGY}
+      )
 """
 
 # QUERY_BASE exposta para preview no app.py (admin)
