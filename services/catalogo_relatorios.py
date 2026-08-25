@@ -2,12 +2,12 @@ RELATORIOS_CATALOGO = [
     {
         'id': 'compras',
         'titulo': 'Compras',
-        'descricao': 'Relatórios de pedidos, fornecedores e processos de compra.',
+        'descricao': 'Pedidos de compra e o que ainda precisa de aprovação.',
         'relatorios': [
             {
                 'id': 'pedidos',
                 'titulo': 'Pedidos de Compra',
-                'descricao': 'Consulta, sincronização e exportação de pedidos de compra.',
+                'descricao': 'Lista os pedidos de compra dos compradores do setor.',
                 'path': '/relatorios/compras/pedidos',
                 'api_base': '/api/relatorios/compras/pedidos',
                 'ativo': False,
@@ -15,7 +15,7 @@ RELATORIOS_CATALOGO = [
             {
                 'id': 'historico',
                 'titulo': 'Histórico de Pedidos',
-                'descricao': 'Todos os pedidos de compra de 2024 até hoje, sem filtro por comprador.',
+                'descricao': 'Todos os pedidos de compra desde 2024, sem filtrar por comprador.',
                 'path': '/relatorios/compras/historico',
                 'api_base': '/api/relatorios/compras/historico',
                 'ativo': False,
@@ -23,7 +23,7 @@ RELATORIOS_CATALOGO = [
             {
                 'id': 'pendencia_aprovacao',
                 'titulo': 'Pendências de Aprovação',
-                'descricao': 'Pedidos de compra com aprovação pendente, filtrável por aprovador e período.',
+                'descricao': 'Pedidos de compra que ainda aguardam aprovação. Dá para filtrar por aprovador e período.',
                 'path': '/relatorios/compras/pendencia-aprovacao',
                 'api_base': '/api/relatorios/compras/pendencia-aprovacao',
                 'ativo': True,
@@ -31,7 +31,7 @@ RELATORIOS_CATALOGO = [
             {
                 'id': 'pedidos_detalhado',
                 'titulo': 'Pedidos de Compra',
-                'descricao': 'Pedidos de compra com Centro de Custo, Item Orçamentário, Conta Contábil e Condição de Pagamento.',
+                'descricao': 'Pedidos de compra com centro de custo, item orçamentário, conta, condição de pagamento e revisão.',
                 'path': '/relatorios/compras/pedidos-detalhado',
                 'api_base': '/api/relatorios/compras/pedidos-detalhado',
                 'ativo': True,
@@ -41,12 +41,12 @@ RELATORIOS_CATALOGO = [
     {
         'id': 'estoque',
         'titulo': 'Estoque',
-        'descricao': 'Relatórios de saldo, disponibilidade e visão atual do estoque.',
+        'descricao': 'Quanto há de cada produto em cada filial e armazém.',
         'relatorios': [
             {
                 'id': 'saldos',
                 'titulo': 'Saldo em Estoque',
-                'descricao': 'Consulta, sincronização e exportação do saldo atual por filial e armazém.',
+                'descricao': 'Saldo atual de cada produto por filial e armazém, incluindo o que já está reservado.',
                 'path': '/relatorios/estoque/saldos',
                 'api_base': '/api/relatorios/estoque/saldos',
                 'ativo': True,
@@ -56,12 +56,12 @@ RELATORIOS_CATALOGO = [
     {
         'id': 'financeiro',
         'titulo': 'Controladoria Financeira',
-        'descricao': 'Movimentações financeiras do ERP Protheus: NFs, títulos e movimentos bancários.',
+        'descricao': 'Notas fiscais, contas a pagar e a receber, e movimentos bancários.',
         'relatorios': [
             {
                 'id': 'nf_entrada',
                 'titulo': 'NF de Entrada',
-                'descricao': 'Itens das Notas Fiscais de Entrada (SD1) a partir de 2024.',
+                'descricao': 'Itens das notas fiscais de entrada (compras) a partir de 2024.',
                 'path': '/relatorios/financeiro/nf-entrada',
                 'api_base': '/api/relatorios/financeiro/nf-entrada',
                 'ativo': True,
@@ -69,7 +69,7 @@ RELATORIOS_CATALOGO = [
             {
                 'id': 'nf_saida',
                 'titulo': 'NF de Saída',
-                'descricao': 'Itens das Notas Fiscais de Saída (SD2) a partir de 2024.',
+                'descricao': 'Itens das notas fiscais de saída (vendas) a partir de 2024.',
                 'path': '/relatorios/financeiro/nf-saida',
                 'api_base': '/api/relatorios/financeiro/nf-saida',
                 'ativo': True,
@@ -77,7 +77,7 @@ RELATORIOS_CATALOGO = [
             {
                 'id': 'contas_receber',
                 'titulo': 'Contas a Receber',
-                'descricao': 'Títulos a receber (SE1) emitidos a partir de 2024.',
+                'descricao': 'O que a empresa tem a receber de clientes, a partir de 2024.',
                 'path': '/relatorios/financeiro/contas-receber',
                 'api_base': '/api/relatorios/financeiro/contas-receber',
                 'ativo': True,
@@ -85,7 +85,7 @@ RELATORIOS_CATALOGO = [
             {
                 'id': 'contas_pagar',
                 'titulo': 'Contas a Pagar',
-                'descricao': 'Títulos a pagar (SE2) emitidos a partir de 2024.',
+                'descricao': 'O que a empresa tem a pagar a fornecedores, a partir de 2024.',
                 'path': '/relatorios/financeiro/contas-pagar',
                 'api_base': '/api/relatorios/financeiro/contas-pagar',
                 'ativo': True,
@@ -93,7 +93,7 @@ RELATORIOS_CATALOGO = [
             {
                 'id': 'mov_bancarios',
                 'titulo': 'Movimentos Bancários',
-                'descricao': 'Movimentos bancários (SE5) registrados a partir de 2024.',
+                'descricao': 'Entradas e saídas nas contas bancárias, a partir de 2024.',
                 'path': '/relatorios/financeiro/mov-bancarios',
                 'api_base': '/api/relatorios/financeiro/mov-bancarios',
                 'ativo': True,
@@ -103,12 +103,12 @@ RELATORIOS_CATALOGO = [
     {
         'id': 'energy',
         'titulo': 'Energy',
-        'descricao': 'Relatórios do negócio Energy (E2_ITEMD = 05.001).',
+        'descricao': 'Compras e financeiro do negócio Energy.',
         'relatorios': [
             {
                 'id': 'contas_pagar',
                 'titulo': 'Contas a Pagar',
-                'descricao': 'Títulos a pagar (SE2) do negócio Energy, excluindo naturezas internas.',
+                'descricao': 'O que o negócio Energy tem a pagar, sem os lançamentos só de uso interno.',
                 'path': '/relatorios/energy/contas-pagar',
                 'api_base': '/api/relatorios/energy/contas-pagar',
                 'ativo': True,
@@ -116,7 +116,7 @@ RELATORIOS_CATALOGO = [
             {
                 'id': 'pedidos',
                 'titulo': 'Pedidos de Compra',
-                'descricao': 'Pedidos de compra (SC7) dos compradores do setor Energy.',
+                'descricao': 'Pedidos de compra dos compradores do setor Energy.',
                 'path': '/relatorios/energy/pedidos',
                 'api_base': '/api/relatorios/energy/pedidos',
                 'ativo': False,
@@ -124,7 +124,7 @@ RELATORIOS_CATALOGO = [
             {
                 'id': 'pedidos_conta_05001',
                 'titulo': 'Pedidos de Compra',
-                'descricao': 'Pedidos com item contábil 05.001 e pedidos dos compradores do setor Energy.',
+                'descricao': 'Pedidos de compra do Energy: da conta do negócio e dos compradores do setor, com o status de aprovação.',
                 'path': '/relatorios/energy/pedidos-conta-05001',
                 'api_base': '/api/relatorios/energy/pedidos-conta-05001',
                 'ativo': True,
@@ -132,7 +132,7 @@ RELATORIOS_CATALOGO = [
             {
                 'id': 'nf_saida',
                 'titulo': 'Contas a Receber',
-                'descricao': 'Títulos a receber (SE1) do negócio Energy (E1_ITEMC = 05.001).',
+                'descricao': 'O que o negócio Energy tem a receber, a partir de 2024.',
                 'path': '/relatorios/energy/nf-saida',
                 'api_base': '/api/relatorios/energy/nf-saida',
                 'ativo': True,
