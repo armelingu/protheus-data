@@ -3,21 +3,20 @@
 {% block extra_head %}
 <link rel="stylesheet" href="/statics/css/admin/admin.css">
 <style>
-.perfil-shell { max-width: 860px; margin: 0 auto; padding: 32px 24px; }
-.perfil-header { margin-bottom: 32px; }
-.perfil-header h1 { font-size: 1.6rem; font-weight: 700; color: #1a1a1a; margin: 0 0 4px; }
-.perfil-header p { color: #888; font-size: .9rem; margin: 0; }
-.perfil-panel { background: #fff; border: 1px solid #e8e8e8; border-radius: 10px; margin-bottom: 20px; overflow: hidden; }
-.perfil-panel-head { padding: 20px 24px 0; }
-.perfil-panel-head h2 { font-size: 1rem; font-weight: 700; color: #1a1a1a; margin: 0 0 2px; }
-.perfil-panel-head p { font-size: .82rem; color: #888; margin: 0 0 16px; }
-.perfil-panel-body { padding: 0 24px 20px; }
+button.admin-tab {
+    background: none;
+    border: none;
+    padding: 0;
+    font-family: inherit;
+    cursor: pointer;
+}
+.perfil-aba { display: flex; flex-direction: column; gap: 14px; }
+.perfil-aba[hidden] { display: none !important; }
 .info-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
-.info-item { }
 .info-item strong { display: block; font-size: .75rem; font-weight: 600; color: #aaa; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 4px; }
 .info-item span { font-size: .9rem; color: #1a1a1a; }
-.pbi-divider { border: none; border-top: 1px solid #f0f0f0; margin: 16px 0; }
-.token-list { list-style: none; margin: 0 0 16px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.pbi-nota { margin: 14px 0 0; color: #8a8a8a; font-size: 12px; line-height: 1.6; }
+.token-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .token-item { display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: #fafafa; border: 1px solid #eee; border-radius: 0; }
 .token-item-info { flex: 1; min-width: 0; }
 .token-item-nome { font-size: .9rem; font-weight: 600; color: #1a1a1a; }
@@ -44,13 +43,11 @@
 .endpoint-url { flex: 1; font-family: monospace; font-size: .82rem; color: #1a1a1a; word-break: break-all; }
 .endpoint-copy { padding: 5px 12px; border: 1px solid #e0e0e0; background: #fff; color: #1a1a1a; border-radius: 0; font-size: .8rem; cursor: pointer; white-space: nowrap; }
 .endpoint-copy:hover { background: #f5f5f5; }
-.campo-input-wrap-perfil {
-    position: relative;
-}
-.campo-input-wrap-perfil input {
-    padding-right: 40px;
-    width: 100%;
-}
+.pbi-alerta { padding: 12px 14px; margin-top: 16px; font-size: .82rem; }
+.pbi-alerta-sync { background: #fff8e6; border-left: 3px solid #e0a800; color: #7a5510; }
+.pbi-alerta-revogar { background: #fdecea; border-left: 3px solid #c0392b; color: #7a1a1a; }
+.campo-input-wrap-perfil { position: relative; }
+.campo-input-wrap-perfil input { padding-right: 40px; width: 100%; }
 .btn-ver-senha-perfil {
     position: absolute;
     right: 9px;
@@ -71,19 +68,28 @@
 {% endblock %}
 
 {% block page_content %}
-<section class="perfil-shell">
-    <div class="perfil-header">
-        <h1>Meu Perfil</h1>
-        <p>Gerencie suas informações, tokens de API e integrações com ferramentas externas.</p>
-    </div>
-
-    <!-- Informações do usuário -->
-    <div class="perfil-panel">
-        <div class="perfil-panel-head">
-            <h2>Informações da conta</h2>
-            <p>Dados do seu perfil no sistema.</p>
+<section class="admin-shell">
+    <header class="admin-header">
+        <div class="admin-header-copy">
+            <p class="admin-kicker">Conta</p>
+            <h1>Meu Perfil</h1>
+            <p class="admin-subtitulo">Dados da conta, senha e conexão com Power BI ou Excel.</p>
         </div>
-        <div class="perfil-panel-body">
+        <nav class="admin-tabs" aria-label="Seções do perfil">
+            <button type="button" class="admin-tab ativo" data-tab="perfil">Perfil</button>
+            <button type="button" class="admin-tab" data-tab="powerbi">Power BI &amp; Excel</button>
+        </nav>
+    </header>
+
+    <div id="aba-perfil" class="perfil-aba" data-perfil-aba="perfil">
+        <div class="admin-panel">
+            <div class="admin-panel-top">
+                <div>
+                    <p class="admin-section-kicker">Conta</p>
+                    <h2>Informações da conta</h2>
+                </div>
+                <p class="admin-panel-texto">Dados do seu perfil no sistema.</p>
+            </div>
             <div class="info-grid">
                 <div class="info-item">
                     <strong>Nome</strong>
@@ -103,57 +109,64 @@
                 </div>
             </div>
         </div>
+
+        <details class="admin-panel admin-panel-collapsible" data-panel="alterar-senha" id="painel-alterar-senha">
+            <summary class="admin-panel-summary">
+                <div>
+                    <p class="admin-section-kicker">Acesso</p>
+                    <h2>Alterar senha</h2>
+                </div>
+                <div class="admin-panel-summary-side">
+                    <p class="admin-panel-texto">Redefina sua senha de acesso ao sistema.</p>
+                    <span class="admin-collapse-chevron" aria-hidden="true">
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                            <path d="M2 4l4 4 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </span>
+                </div>
+            </summary>
+            <div class="admin-panel-body">
+                <form id="form-alterar-senha" style="max-width:360px">
+                    <div class="admin-field" style="margin-bottom:12px">
+                        <span>Senha atual</span>
+                        <div class="campo-input-wrap-perfil">
+                            <input type="password" id="perfil-senha-atual" placeholder="Digite sua senha atual" autocomplete="current-password">
+                            <button type="button" class="btn-ver-senha-perfil" data-alvo="perfil-senha-atual" aria-label="Mostrar senha"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+                        </div>
+                    </div>
+                    <div class="admin-field" style="margin-bottom:12px">
+                        <span>Nova senha</span>
+                        <div class="campo-input-wrap-perfil">
+                            <input type="password" id="perfil-nova-senha" placeholder="Minimo 10 caracteres" autocomplete="new-password">
+                            <button type="button" class="btn-ver-senha-perfil" data-alvo="perfil-nova-senha" aria-label="Mostrar senha"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+                        </div>
+                        <small class="admin-field-hint">Minimo 10 caracteres e pelo menos 1 numero.</small>
+                    </div>
+                    <div class="admin-field" style="margin-bottom:16px">
+                        <span>Confirmar nova senha</span>
+                        <div class="campo-input-wrap-perfil">
+                            <input type="password" id="perfil-confirmar-senha" placeholder="Repita a nova senha" autocomplete="new-password">
+                            <button type="button" class="btn-ver-senha-perfil" data-alvo="perfil-confirmar-senha" aria-label="Mostrar senha"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+                        </div>
+                    </div>
+                    <button type="submit" class="admin-btn admin-btn-primario" id="btn-alterar-senha">Alterar senha</button>
+                    <div id="alterar-senha-erro" style="margin-top:10px;font-size:.82rem;color:#c0392b;display:none"></div>
+                </form>
+            </div>
+        </details>
     </div>
 
-    <!-- Alterar senha -->
-    <div class="perfil-panel">
-        <div class="perfil-panel-head">
-            <h2>Alterar senha</h2>
-            <p>Redefina sua senha de acesso ao sistema.</p>
-        </div>
-        <div class="perfil-panel-body">
-            <form id="form-alterar-senha" style="max-width:360px">
-                <div class="admin-field" style="margin-bottom:12px">
-                    <span>Senha atual</span>
-                    <div class="campo-input-wrap-perfil">
-                        <input type="password" id="perfil-senha-atual" placeholder="Digite sua senha atual" autocomplete="current-password">
-                        <button type="button" class="btn-ver-senha-perfil" data-alvo="perfil-senha-atual" aria-label="Mostrar senha"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
-                    </div>
+    <div id="aba-powerbi" class="perfil-aba" data-perfil-aba="powerbi" hidden>
+        <div class="admin-panel">
+            <div class="admin-panel-top">
+                <div>
+                    <p class="admin-section-kicker">Integração</p>
+                    <h2>Tokens de acesso</h2>
                 </div>
-                <div class="admin-field" style="margin-bottom:12px">
-                    <span>Nova senha</span>
-                    <div class="campo-input-wrap-perfil">
-                        <input type="password" id="perfil-nova-senha" placeholder="Minimo 10 caracteres" autocomplete="new-password">
-                        <button type="button" class="btn-ver-senha-perfil" data-alvo="perfil-nova-senha" aria-label="Mostrar senha"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
-                    </div>
-                    <small style="display:block;margin-top:4px;color:#aaa;font-size:.75rem">Minimo 10 caracteres e pelo menos 1 numero.</small>
-                </div>
-                <div class="admin-field" style="margin-bottom:16px">
-                    <span>Confirmar nova senha</span>
-                    <div class="campo-input-wrap-perfil">
-                        <input type="password" id="perfil-confirmar-senha" placeholder="Repita a nova senha" autocomplete="new-password">
-                        <button type="button" class="btn-ver-senha-perfil" data-alvo="perfil-confirmar-senha" aria-label="Mostrar senha"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
-                    </div>
-                </div>
-                <button type="submit" class="admin-btn admin-btn-primario" id="btn-alterar-senha">Alterar senha</button>
-                <div id="alterar-senha-erro" style="margin-top:10px;font-size:.82rem;color:#c0392b;display:none"></div>
-            </form>
-        </div>
-    </div>
+                <p class="admin-panel-texto">O token só aparece uma vez, na hora de criar. Copie as URLs da caixa verde e use no Power BI ou no Excel.</p>
+            </div>
 
-    <!-- Power BI / Tokens -->
-    <div class="perfil-panel">
-        <div class="perfil-panel-head">
-            <h2>Integração — Power BI &amp; Excel</h2>
-            <p>Crie tokens de acesso para conectar Power BI, Excel ou qualquer ferramenta que consuma dados via URL.</p>
-        </div>
-        <div class="perfil-panel-body">
-
-            <p style="font-size:.85rem;color:#555;margin:0 0 16px;">
-                Cada token é uma chave pessoal e intransferível. Quando conectado a um relatório, ele sempre retornará os dados mais recentes do cache sincronizado.
-                Guarde o token em local seguro — ele só é exibido <strong>uma vez</strong> no momento da criação.
-            </p>
-
+            {% if endpoints_pbi %}
             <div class="criar-token-row">
                 <label class="admin-field">
                     <span>Nome do token</span>
@@ -167,134 +180,136 @@
                 <p style="font-size:.78rem;color:#c0392b;margin:0;display:none" id="token-escopo-aviso">Selecione pelo menos um relatório.</p>
             </div>
 
-            <button type="button" class="admin-btn admin-btn-primario" id="btn-criar-token" style="white-space:nowrap">+ Gerar token</button>
+            <button type="button" class="admin-btn admin-btn-primario" id="btn-criar-token" style="white-space:nowrap">Gerar token</button>
+            {% else %}
+            <p class="admin-vazio" style="padding-top:0">Você não possui permissão em nenhum relatório com integração disponível. Solicite acesso ao administrador.</p>
+            <input type="hidden" id="token-nome">
+            <div id="token-escopo-opcoes" hidden></div>
+            <p id="token-escopo-aviso" hidden></p>
+            <button type="button" id="btn-criar-token" hidden>Gerar token</button>
+            {% endif %}
 
             <div id="token-novo-reveal" style="display:none"></div>
 
-            <hr class="pbi-divider" style="margin-top:20px">
-
-            <p style="font-size:.82rem;font-weight:600;color:#aaa;margin:0 0 10px;text-transform:uppercase;letter-spacing:.5px;">Tokens ativos</p>
+            <p style="font-size:.82rem;font-weight:600;color:#aaa;margin:20px 0 10px;text-transform:uppercase;letter-spacing:.5px;">Tokens ativos</p>
             <ul class="token-list" id="token-list">
                 <li style="font-size:.85rem;color:#aaa">Carregando...</li>
             </ul>
-
-            <hr class="pbi-divider">
-
-            <!-- Endpoints — só exibe o que o usuário tem permissão -->
-            {% if endpoints_pbi %}
-            <p style="font-size:.82rem;font-weight:600;color:#aaa;margin:0 0 6px;text-transform:uppercase;letter-spacing:.5px;">Endpoints disponíveis para você</p>
-            <p style="font-size:.8rem;color:#888;margin:0 0 10px;">
-                Gere um token acima para ver as URLs completas prontas para copiar.
-                Se já tiver um token ativo, monte a URL manualmente adicionando
-                <code style="font-family:monospace;background:#f0f0f0;padding:1px 5px;font-size:.78rem">?token=SEU_TOKEN</code> ao endpoint desejado.
-            </p>
-
-            <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px" id="endpoints-box">
-                {% for ep in endpoints_pbi %}
-                <div class="endpoint-row" data-chave="{{ ep.chave }}" data-url-path="{{ ep.url_path }}">
-                    <span class="endpoint-tag">{{ ep.tag }}</span>
-                    <span class="endpoint-url js-endpoint-url">— gere um token para ver a URL —</span>
-                    <button type="button" class="endpoint-copy js-endpoint-copy" disabled>Copiar</button>
-                </div>
-                {% endfor %}
-            </div>
-            {% else %}
-            <div style="padding:12px 14px;background:#fafafa;border:1px solid #eee;margin-bottom:20px;font-size:.85rem;color:#888">
-                Você não possui permissão em nenhum relatório com integração disponível no momento.
-                Solicite acesso ao administrador.
-            </div>
-            {% endif %}
-
-            <hr class="pbi-divider">
-
-            <!-- Instruções Power BI -->
-            <p style="font-size:.82rem;font-weight:600;color:#aaa;margin:0 0 12px;text-transform:uppercase;letter-spacing:.5px;">Como conectar no Power BI Desktop</p>
-
-            <ol class="pbi-steps">
-                <li>
-                    <div>
-                        <strong>Gere um token nesta página</strong>
-                        Dê um nome identificável (ex.: "Power BI Controladoria") e clique em "+ Gerar token".
-                        Uma caixa verde aparecerá com as <strong>URLs já montadas e prontas</strong> para copiar — use-as nos passos seguintes.
-                    </div>
-                </li>
-                <li>
-                    <div>
-                        <strong>Abra o Power BI Desktop</strong>
-                        No menu <em>Página Inicial</em>, clique em <strong>Obter Dados → Feed OData</strong>.
-                    </div>
-                </li>
-                <li>
-                    <div>
-                        <strong>Cole a URL do endpoint na caixa "URL"</strong>
-                        Use a URL copiada da caixa verde que apareceu ao gerar o token — ela já inclui o token de autenticação.
-                        {% if endpoints_pbi %}<br><small style="color:#888">Formato esperado: <code id="url-exemplo" style="font-size:.78rem">— gere um token para ver o exemplo —</code></small>{% endif %}
-                    </div>
-                </li>
-                <li>
-                    <div>
-                        <strong>Escolha "Anônima" na etapa de autenticação</strong>
-                        O Power BI pedirá como autenticar — selecione <strong>Anônima</strong> e clique em Conectar.
-                        A autenticação já está embutida na URL pelo token.
-                    </div>
-                </li>
-                <li>
-                    <div>
-                        <strong>Carregue os dados</strong>
-                        Clique em <strong>Carregar</strong> para importar diretamente, ou em <strong>Transformar Dados</strong> para ajustar colunas antes. Os dados refletem o último sync do sistema.
-                    </div>
-                </li>
-                <li>
-                    <div>
-                        <strong>Configure a atualização agendada</strong>
-                        No Power BI Desktop, vá em <em>Página Inicial → Atualizar</em> a qualquer momento para puxar os dados mais recentes.
-                        Para atualização automática no Power BI Service (online), é necessário um <strong>gateway de dados</strong> — consulte o TI, pois o sistema roda em rede interna.
-                    </div>
-                </li>
-            </ol>
-
-            <div style="padding:12px 14px;background:#fff8e6;border-left:3px solid #e0a800;margin-top:16px;font-size:.82rem;color:#7a5510">
-                <strong>Atenção — horário de sincronização:</strong> os dados são atualizados automaticamente <strong>de hora em hora entre 8h e 19h</strong> nos dias úteis. Atualizações feitas no Power BI fora desse horário retornarão os últimos dados disponíveis no cache — não há dados novos do Protheus fora desse período.
-            </div>
-
-            <hr class="pbi-divider">
-
-            <!-- Instruções Excel -->
-            <p style="font-size:.82rem;font-weight:600;color:#aaa;margin:0 0 12px;text-transform:uppercase;letter-spacing:.5px;">Como conectar no Excel (Power Query)</p>
-
-            <ol class="pbi-steps">
-                <li>
-                    <div>
-                        <strong>Gere um token e copie a URL</strong>
-                        Siga o Passo 1 do Power BI acima. A URL gerada funciona igualmente no Excel.
-                    </div>
-                </li>
-                <li>
-                    <div>
-                        <strong>No Excel, abra o Power Query</strong>
-                        Vá em <em>Dados → Obter Dados → De Outras Fontes → Do Feed OData</em>.
-                    </div>
-                </li>
-                <li>
-                    <div>
-                        <strong>Cole a URL e conecte</strong>
-                        Cole a URL copiada e clique em OK. Quando solicitado, escolha <strong>Anônima</strong> como método de autenticação.
-                    </div>
-                </li>
-                <li>
-                    <div>
-                        <strong>Carregue a tabela</strong>
-                        No painel do Power Query, selecione a tabela de dados e clique em <strong>Fechar e Carregar</strong>.
-                        Para atualizar, clique com o botão direito na tabela e selecione <strong>Atualizar</strong>.
-                    </div>
-                </li>
-            </ol>
-
-            <div style="padding:12px 14px;background:#fdecea;border-left:3px solid #c0392b;margin-top:16px;font-size:.82rem;color:#7a1a1a">
-                <strong>Importante — ao revogar um token:</strong> qualquer conexão do Power BI ou Excel que usa aquele token deixará de funcionar imediatamente.
-                Ao criar um token substituto, será necessário atualizar a URL da fonte de dados em cada relatório/pasta de trabalho.
-            </div>
+            <p class="pbi-nota">Ao revogar um token, as conexões do Power BI e do Excel que o usam param na hora. Um token novo exige atualizar a URL em cada relatório.</p>
         </div>
+
+        <details class="admin-panel admin-panel-collapsible" data-panel="ajuda-powerbi" id="painel-ajuda-powerbi">
+            <summary class="admin-panel-summary">
+                <div>
+                    <p class="admin-section-kicker">Ajuda</p>
+                    <h2>Como conectar no Power BI Desktop</h2>
+                </div>
+                <div class="admin-panel-summary-side">
+                    <p class="admin-panel-texto">Passo a passo para importar os dados pelo feed OData.</p>
+                    <span class="admin-collapse-chevron" aria-hidden="true">
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                            <path d="M2 4l4 4 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </span>
+                </div>
+            </summary>
+            <div class="admin-panel-body">
+                <ol class="pbi-steps">
+                    <li>
+                        <div>
+                            <strong>Gere um token nesta página</strong>
+                            Dê um nome identificável (ex.: "Power BI Controladoria") e clique em Gerar token.
+                            Uma caixa verde aparece com as <strong>URLs já montadas</strong> — copie a do relatório desejado.
+                        </div>
+                    </li>
+                    <li>
+                        <div>
+                            <strong>Abra o Power BI Desktop</strong>
+                            No menu <em>Página Inicial</em>, clique em <strong>Obter Dados → Feed OData</strong>.
+                        </div>
+                    </li>
+                    <li>
+                        <div>
+                            <strong>Cole a URL do endpoint na caixa "URL"</strong>
+                            Use a URL copiada da caixa verde — ela já inclui o token de autenticação.
+                        </div>
+                    </li>
+                    <li>
+                        <div>
+                            <strong>Escolha "Anônima" na etapa de autenticação</strong>
+                            O Power BI pedirá como autenticar — selecione <strong>Anônima</strong> e clique em Conectar.
+                            A autenticação já está embutida na URL pelo token.
+                        </div>
+                    </li>
+                    <li>
+                        <div>
+                            <strong>Carregue os dados</strong>
+                            Clique em <strong>Carregar</strong> para importar diretamente, ou em <strong>Transformar Dados</strong> para ajustar colunas antes. Os dados refletem o último sync do sistema.
+                        </div>
+                    </li>
+                    <li>
+                        <div>
+                            <strong>Configure a atualização agendada</strong>
+                            No Power BI Desktop, vá em <em>Página Inicial → Atualizar</em> a qualquer momento para puxar os dados mais recentes.
+                            Para atualização automática no Power BI Service (online), é necessário um <strong>gateway de dados</strong> — consulte o TI, pois o sistema roda em rede interna.
+                        </div>
+                    </li>
+                </ol>
+                <div class="pbi-alerta pbi-alerta-sync">
+                    <strong>Horário de sincronização:</strong> os dados são atualizados automaticamente <strong>de hora em hora entre 8h e 19h</strong> nos dias úteis. Atualizações no Power BI fora desse horário trazem o último cache — não há dados novos do Protheus nesse intervalo.
+                </div>
+            </div>
+        </details>
+
+        <details class="admin-panel admin-panel-collapsible" data-panel="ajuda-excel" id="painel-ajuda-excel">
+            <summary class="admin-panel-summary">
+                <div>
+                    <p class="admin-section-kicker">Ajuda</p>
+                    <h2>Como conectar no Excel (Power Query)</h2>
+                </div>
+                <div class="admin-panel-summary-side">
+                    <p class="admin-panel-texto">Mesma URL do token, pelo Power Query do Excel.</p>
+                    <span class="admin-collapse-chevron" aria-hidden="true">
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                            <path d="M2 4l4 4 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </span>
+                </div>
+            </summary>
+            <div class="admin-panel-body">
+                <ol class="pbi-steps">
+                    <li>
+                        <div>
+                            <strong>Gere um token e copie a URL</strong>
+                            Use a caixa verde após gerar o token. A URL vale também no Excel.
+                        </div>
+                    </li>
+                    <li>
+                        <div>
+                            <strong>No Excel, abra o Power Query</strong>
+                            Vá em <em>Dados → Obter Dados → De Outras Fontes → Do Feed OData</em>.
+                        </div>
+                    </li>
+                    <li>
+                        <div>
+                            <strong>Cole a URL e conecte</strong>
+                            Cole a URL copiada e clique em OK. Quando solicitado, escolha <strong>Anônima</strong> como método de autenticação.
+                        </div>
+                    </li>
+                    <li>
+                        <div>
+                            <strong>Carregue a tabela</strong>
+                            No painel do Power Query, selecione a tabela de dados e clique em <strong>Fechar e Carregar</strong>.
+                            Para atualizar, clique com o botão direito na tabela e selecione <strong>Atualizar</strong>.
+                        </div>
+                    </li>
+                </ol>
+                <div class="pbi-alerta pbi-alerta-revogar">
+                    <strong>Ao revogar um token:</strong> qualquer conexão do Power BI ou Excel que usa aquele token deixa de funcionar na hora.
+                    Com um token substituto, atualize a URL da fonte de dados em cada relatório ou pasta de trabalho.
+                </div>
+            </div>
+        </details>
     </div>
 </section>
 
@@ -307,5 +322,6 @@
 <script type="application/json" id="perfil-endpoints">
 {{ endpoints_pbi | tojson }}
 </script>
+<script src="/statics/js/admin/paineis.js"></script>
 <script src="/statics/js/perfil/perfil.js"></script>
 {% endblock %}

@@ -4,12 +4,50 @@ document.addEventListener('DOMContentLoaded', function() {
     var tokenList        = document.getElementById('token-list');
     var tokenReveal      = document.getElementById('token-novo-reveal');
     var mensagem         = document.getElementById('mensagem');
-    var urlExemploEl     = document.getElementById('url-exemplo');
     var escopoOpcoes     = document.getElementById('token-escopo-opcoes');
     var escopoAviso      = document.getElementById('token-escopo-aviso');
-    var endpointsBox     = document.getElementById('endpoints-box');
     var mensagemTimeout  = null;
     var BASE_URL         = window.location.origin;
+    var ABA_STORAGE      = 'perfil.aba';
+
+    function abaPorHash() {
+        return window.location.hash === '#power-bi' ? 'powerbi' : 'perfil';
+    }
+
+    function ativarAba(id, persistir) {
+        document.querySelectorAll('[data-perfil-aba]').forEach(function (el) {
+            el.hidden = el.getAttribute('data-perfil-aba') !== id;
+        });
+        document.querySelectorAll('.admin-tab[data-tab]').forEach(function (btn) {
+            btn.classList.toggle('ativo', btn.getAttribute('data-tab') === id);
+        });
+        if (persistir !== false) {
+            try { window.localStorage.setItem(ABA_STORAGE, id); } catch (err) {}
+            var hash = id === 'powerbi' ? '#power-bi' : '#perfil';
+            if (window.history.replaceState) {
+                window.history.replaceState(null, '', window.location.pathname + hash);
+            } else {
+                window.location.hash = hash;
+            }
+        }
+    }
+
+    document.querySelectorAll('.admin-tab[data-tab]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            ativarAba(btn.getAttribute('data-tab'));
+        });
+    });
+
+    var abaInicial = abaPorHash();
+    if (window.location.hash !== '#power-bi' && window.location.hash !== '#perfil') {
+        try {
+            abaInicial = window.localStorage.getItem(ABA_STORAGE) || 'perfil';
+        } catch (err) {
+            abaInicial = 'perfil';
+        }
+    }
+    ativarAba(abaInicial);
+    persistirPaineisAdmin('perfil.panel.');
 
     // Lista declarativa dos relatórios disponíveis para este usuário, vinda do backend.
     // Cada item: { chave, tag, titulo, url_path }
@@ -28,7 +66,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     /* ── renderizar checkboxes de escopo disponíveis ──────────────────────── */
     function renderizarEscopoOpcoes() {
-        if (!escopoOpcoes) return;
+        if (!escopoOpcoes || escopoOpcoes.hidden) return;
         if (!ENDPOINTS.length) {
             escopoOpcoes.innerHTML = '<span style="font-size:.82rem;color:#aaa">Nenhum relatório disponível para você.</span>';
             return;
@@ -75,31 +113,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }).catch(function() {
             mostrarMensagem('Não foi possível copiar automaticamente. Copie manualmente.', 'erro');
         });
-    }
-
-    function atualizarUrlsInterface(token) {
-        if (!endpointsBox) return;
-        var temToken = !!token;
-        var linhas = endpointsBox.querySelectorAll('.endpoint-row');
-        linhas.forEach(function(row) {
-            var chave = row.getAttribute('data-chave');
-            var urlPath = row.getAttribute('data-url-path');
-            var ep = ENDPOINTS.find(function(e) { return e.chave === chave; })
-                     || { url_path: urlPath };
-            var urlEl = row.querySelector('.js-endpoint-url');
-            var btnEl = row.querySelector('.js-endpoint-copy');
-            var url = montarUrlEndpoint(ep, token);
-            if (urlEl) urlEl.textContent = temToken ? url : '— gere um token para ver a URL —';
-            if (btnEl) btnEl.disabled = !temToken;
-        });
-
-        if (urlExemploEl) {
-            if (temToken && ENDPOINTS.length) {
-                urlExemploEl.textContent = montarUrlEndpoint(ENDPOINTS[0], token);
-            } else {
-                urlExemploEl.textContent = '— gere um token para ver o exemplo —';
-            }
-        }
     }
 
     function labelPorChave(chave) {
@@ -154,7 +167,7 @@ document.addEventListener('DOMContentLoaded', function() {
         tokenReveal.innerHTML = [
             '<div class="token-novo-box">',
             '<p>Token gerado com sucesso!</p>',
-            '<small>⚠ Copie agora — este valor não será exibido novamente.</small>',
+            '<small>Copie agora — este valor não será exibido novamente.</small>',
             '<div class="token-copy-row">',
             '<span class="token-value" id="token-val">' + escapeHtml(token) + '</span>',
             '<button type="button" class="token-copy-btn" id="btn-copiar-token">Copiar token</button>',
@@ -180,7 +193,7 @@ document.addEventListener('DOMContentLoaded', function() {
             .catch(function() { tokenList.innerHTML = '<li style="color:#c0392b;font-size:.85rem">Falha ao carregar tokens.</li>'; });
     }
 
-    btnCriar.addEventListener('click', function() {
+    if (btnCriar) btnCriar.addEventListener('click', function() {
         var nome = tokenNomeEl.value.trim();
         if (!nome) { tokenNomeEl.focus(); mostrarMensagem('Dê um nome ao token antes de criar.', 'erro'); return; }
 
@@ -203,7 +216,9 @@ document.addEventListener('DOMContentLoaded', function() {
             tokenNomeEl.value = '';
             mostrarMensagem(d.mensagem || 'Token gerado.', 'sucesso');
             mostrarTokenNovo(d.token, escopos);
-            atualizarUrlsInterface(d.token);
+            if (tokenReveal.scrollIntoView) {
+                tokenReveal.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
             return carregarTokens();
         })
         .catch(function(e) { mostrarMensagem(e.message || 'Falha ao gerar token.', 'erro'); });
@@ -219,7 +234,6 @@ document.addEventListener('DOMContentLoaded', function() {
         .then(function(d) {
             mostrarMensagem(d.mensagem || 'Token revogado. Atualize a URL nas ferramentas que usavam este token.', 'sucesso');
             tokenReveal.style.display = 'none';
-            atualizarUrlsInterface(null);
             return carregarTokens();
         })
         .catch(function(e) { mostrarMensagem(e.message || 'Falha ao revogar token.', 'erro'); });
@@ -230,18 +244,7 @@ document.addEventListener('DOMContentLoaded', function() {
         copiarTexto(e.target.getAttribute('data-value'), e.target);
     });
 
-    if (endpointsBox) {
-        endpointsBox.addEventListener('click', function(e) {
-            var btn = e.target.closest('.js-endpoint-copy');
-            if (!btn || btn.disabled) return;
-            var row = btn.closest('.endpoint-row');
-            var urlEl = row && row.querySelector('.js-endpoint-url');
-            if (urlEl) copiarTexto(urlEl.textContent, btn);
-        });
-    }
-
     renderizarEscopoOpcoes();
-    atualizarUrlsInterface(null);
     carregarTokens();
 
     /* ── Toggle mostrar/ocultar senha ────────────────────────────────────── */
