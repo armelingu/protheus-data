@@ -11,7 +11,7 @@ from functools import wraps
 from flask import Flask, request, jsonify, redirect, render_template, send_from_directory, Response, session, g, has_request_context
 from werkzeug.security import check_password_hash, generate_password_hash
 from dotenv import load_dotenv
-from services.catalogo_relatorios import listar_modulos, listar_relatorios_flat, obter_relatorio, chave_relatorio
+from services.catalogo_relatorios import listar_modulos, listar_relatorios_flat, obter_relatorio, chave_relatorio, relatorio_esta_ativo, chaves_acesso_equivalentes
 from services.database import (
     conectar_users,
     conectar_pedidos,
@@ -536,7 +536,7 @@ def token_tem_acesso_relatorio(token_id, modulo_id, relatorio_id):
     escopos = obter_permissoes_token(token_id)
     if escopos is None:
         return False
-    return chave_relatorio(modulo_id, relatorio_id) in escopos
+    return bool(chaves_acesso_equivalentes(modulo_id, relatorio_id) & set(escopos))
 
 
 def salvar_permissoes_setor(setor_id, permissoes, conn=None):
@@ -613,18 +613,20 @@ def atualizar_sessao_usuario(usuario):
 def usuario_tem_acesso_relatorio(usuario, modulo_id, relatorio_id):
     if not usuario:
         return False
+    if not relatorio_esta_ativo(modulo_id, relatorio_id):
+        return False
     if usuario['is_admin']:
         return True
-    chave = chave_relatorio(modulo_id, relatorio_id)
+    chaves = chaves_acesso_equivalentes(modulo_id, relatorio_id)
     perms_usuario = obter_relatorios_permitidos(usuario['id'])
-    usuario_tem = chave in perms_usuario
+    usuario_tem = bool(chaves & perms_usuario)
     setor_id = usuario['setor_id'] if 'setor_id' in usuario.keys() else None
     if setor_id:
         perms_setor = obter_relatorios_permitidos_setor(setor_id)
         # Setor sem permissões configuradas = sem restrição de setor (não bloqueia).
         # Setor com permissões configuradas = usuário precisa ter E setor ter o relatório.
         if perms_setor:
-            return usuario_tem and chave in perms_setor
+            return usuario_tem and bool(chaves & perms_setor)
     return usuario_tem
 
 
@@ -641,13 +643,15 @@ def filtrar_modulos_usuario(usuario):
     for modulo in listar_modulos():
         relatorios = []
         for relatorio in modulo['relatorios']:
+            if not relatorio.get('ativo', True):
+                continue
             if usuario['is_admin']:
                 relatorios.append(relatorio)
             else:
-                chave = chave_relatorio(modulo['id'], relatorio['id'])
-                tem_usuario = chave in permissoes_usuario
+                chaves = chaves_acesso_equivalentes(modulo['id'], relatorio['id'])
+                tem_usuario = bool(chaves & permissoes_usuario)
                 # not permissoes_setor: setor sem permissões configuradas (None ou set vazio) = sem restrição
-                tem_setor   = not permissoes_setor or chave in permissoes_setor
+                tem_setor   = not permissoes_setor or bool(chaves & permissoes_setor)
                 if tem_usuario and tem_setor:
                     relatorios.append(relatorio)
         if relatorios:
@@ -1426,23 +1430,13 @@ def pagina_relatorios():
 @app.route('/consulta')
 @login_requerido
 def pagina_consulta():
-    return redirect('/relatorios/compras/pedidos')
+    return redirect('/relatorios/compras/pedidos-detalhado')
 
 
 @app.route('/relatorios/compras/pedidos')
-@acesso_relatorio_requerido('compras', 'pedidos')
+@login_requerido
 def pagina_relatorio_compras_pedidos():
-    modulo, relatorio = obter_relatorio('compras', 'pedidos')
-    usuario = usuario_atual()
-    pode_ver_query = bool(usuario and usuario['is_admin'] and usuario['pode_ver_query'])
-    return render_template(
-        'relatorios/compras_pedidos.html',
-        modulo_ativo=modulo,
-        relatorio_ativo=relatorio,
-        query_preview=QUERY_PREVIEW_PEDIDOS if pode_ver_query else '',
-        pode_ver_query=pode_ver_query,
-        **contexto_auth('ProtheusData - Pedidos de Compra')
-    )
+    return redirect('/relatorios/compras/pedidos-detalhado')
 
 
 @app.route('/relatorios/energy/pedidos')
@@ -1521,7 +1515,7 @@ def pagina_relatorio_compras_pedidos_detalhado():
         relatorio_ativo=relatorio,
         query_preview=QUERY_PEDIDOS_DETALHADO if pode_ver_query else '',
         pode_ver_query=pode_ver_query,
-        **contexto_auth('ProtheusData - Pedidos de Compra Detalhado')
+        **contexto_auth('ProtheusData - Pedidos de Compra')
     )
 
 
@@ -1593,9 +1587,8 @@ def pagina_gerente():
 # (b) linha na lista de endpoints disponíveis,
 # (c) URL "pronta para copiar" ao gerar um token.
 ENDPOINTS_POWER_BI = [
-    {'chave': 'compras.pedidos',         'tag': 'Pedidos',          'titulo': 'Pedidos de Compra',     'url_path': '/odata/pedidos'},
+    {'chave': 'compras.pedidos_detalhado', 'tag': 'Pedidos',          'titulo': 'Pedidos de Compra',     'url_path': '/odata/pedidos'},
     {'chave': 'energy.pedidos',          'tag': 'Energy Pedidos',   'titulo': 'Pedidos Energy',        'url_path': '/odata/energy-pedidos'},
-    {'chave': 'compras.historico',       'tag': 'Histórico',        'titulo': 'Histórico de Pedidos',  'url_path': '/odata/historico-pedidos'},
     {'chave': 'estoque.saldos',          'tag': 'Estoque',          'titulo': 'Saldo em Estoque',      'url_path': '/odata/estoque'},
     {'chave': 'financeiro.nf_entrada',   'tag': 'NF Entrada',       'titulo': 'NF de Entrada',         'url_path': '/odata/nf-entrada'},
     {'chave': 'financeiro.nf_saida',     'tag': 'NF Saída',         'titulo': 'NF de Saída',           'url_path': '/odata/nf-saida'},
@@ -1864,25 +1857,14 @@ _ODATA_METADATA_XML = '''<?xml version="1.0" encoding="utf-8"?>
         <Property Name="aprovador"         Type="Edm.String"/>
         <Property Name="data_aprovacao"    Type="Edm.String"/>
         <Property Name="status_aprovacao"  Type="Edm.String"/>
-      </EntityType>
-
-      <EntityType Name="HistoricoPedido">
-        <Key>
-          <PropertyRef Name="filial"/>
-          <PropertyRef Name="pedido_compra"/>
-          <PropertyRef Name="item"/>
-        </Key>
-        <Property Name="usuario"           Type="Edm.String"/>
-        <Property Name="filial"            Type="Edm.String" Nullable="false"/>
-        <Property Name="pedido_compra"     Type="Edm.String" Nullable="false"/>
-        <Property Name="item"              Type="Edm.String" Nullable="false"/>
-        <Property Name="produto"           Type="Edm.String"/>
-        <Property Name="descricao_produto" Type="Edm.String"/>
-        <Property Name="quantidade"        Type="Edm.String"/>
-        <Property Name="cod_fornecedor"    Type="Edm.String"/>
-        <Property Name="fornecedor"        Type="Edm.String"/>
-        <Property Name="deposito_estoque"  Type="Edm.String"/>
-        <Property Name="data_emissao"      Type="Edm.String"/>
+        <Property Name="centro_custo"         Type="Edm.String"/>
+        <Property Name="centro_custo_desc"    Type="Edm.String"/>
+        <Property Name="item_conta"           Type="Edm.String"/>
+        <Property Name="item_conta_desc"      Type="Edm.String"/>
+        <Property Name="conta_contabil"       Type="Edm.String"/>
+        <Property Name="conta_contabil_desc"  Type="Edm.String"/>
+        <Property Name="cond_pagamento"       Type="Edm.String"/>
+        <Property Name="cond_pagamento_desc"  Type="Edm.String"/>
       </EntityType>
 
       <!-- ─── Estoque ─────────────────────────────────────────────────────── -->
@@ -2135,7 +2117,6 @@ _ODATA_METADATA_XML = '''<?xml version="1.0" encoding="utf-8"?>
         <EntitySet Name="Pedidos"           EntityType="ProtheusData.Pedido"/>
         <EntitySet Name="EnergyPedidos"     EntityType="ProtheusData.EnergyPedido"/>
         <EntitySet Name="Estoque"           EntityType="ProtheusData.EstoqueSaldo"/>
-        <EntitySet Name="HistoricoPedidos"  EntityType="ProtheusData.HistoricoPedido"/>
         <EntitySet Name="NFEntrada"         EntityType="ProtheusData.NFEntrada"/>
         <EntitySet Name="NFSaida"           EntityType="ProtheusData.NFSaida"/>
         <EntitySet Name="ContasReceber"     EntityType="ProtheusData.ContasReceber"/>
@@ -2435,7 +2416,6 @@ def odata_service_document():
             {'name': 'Pedidos',          'kind': 'EntitySet', 'url': 'pedidos'},
             {'name': 'EnergyPedidos',    'kind': 'EntitySet', 'url': 'energy-pedidos'},
             {'name': 'Estoque',          'kind': 'EntitySet', 'url': 'estoque'},
-            {'name': 'HistoricoPedidos', 'kind': 'EntitySet', 'url': 'historico-pedidos'},
             {'name': 'NFEntrada',        'kind': 'EntitySet', 'url': 'nf-entrada'},
             {'name': 'NFSaida',          'kind': 'EntitySet', 'url': 'nf-saida'},
             {'name': 'ContasReceber',    'kind': 'EntitySet', 'url': 'contas-receber'},
@@ -2470,18 +2450,22 @@ _ODATA_PEDIDOS_COLUNAS = [
     'qtd_entregue', 'num_cotacao', 'moeda', 'cod_fornecedor', 'fornecedor',
     'deposito_estoque', 'data_emissao', 'nivel_aprovacao', 'aprovador',
     'data_aprovacao', 'status_aprovacao',
+    'centro_custo', 'centro_custo_desc',
+    'item_conta', 'item_conta_desc',
+    'conta_contabil', 'conta_contabil_desc',
+    'cond_pagamento', 'cond_pagamento_desc',
 ]
 
 
 @app.route('/odata/pedidos')
 def odata_pedidos():
-    _, erro = _autorizar_odata('compras', 'pedidos', 'Pedidos de Compra')
+    _, erro = _autorizar_odata('compras', 'pedidos_detalhado', 'Pedidos de Compra')
     if erro:
         return erro
     return _odata_paged_response(
         entity_name='Pedidos',
         conectar_fn=conectar_pedidos,
-        tabela='pedidos',
+        tabela='pedidos_detalhado',
         colunas=_ODATA_PEDIDOS_COLUNAS,
         order_by='data_emissao DESC, pedido_compra, item, nivel_aprovacao',
         url_path='/odata/pedidos',

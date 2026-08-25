@@ -10,7 +10,7 @@ RELATORIOS_CATALOGO = [
                 'descricao': 'Consulta, sincronização e exportação de pedidos de compra.',
                 'path': '/relatorios/compras/pedidos',
                 'api_base': '/api/relatorios/compras/pedidos',
-                'ativo': True,
+                'ativo': False,
             },
             {
                 'id': 'historico',
@@ -18,7 +18,7 @@ RELATORIOS_CATALOGO = [
                 'descricao': 'Todos os pedidos de compra de 2024 até hoje, sem filtro por comprador.',
                 'path': '/relatorios/compras/historico',
                 'api_base': '/api/relatorios/compras/historico',
-                'ativo': True,
+                'ativo': False,
             },
             {
                 'id': 'pendencia_aprovacao',
@@ -30,7 +30,7 @@ RELATORIOS_CATALOGO = [
             },
             {
                 'id': 'pedidos_detalhado',
-                'titulo': 'Pedidos de Compra Detalhado',
+                'titulo': 'Pedidos de Compra',
                 'descricao': 'Pedidos de compra com Centro de Custo, Item Orçamentário, Conta Contábil e Condição de Pagamento.',
                 'path': '/relatorios/compras/pedidos-detalhado',
                 'api_base': '/api/relatorios/compras/pedidos-detalhado',
@@ -146,21 +146,40 @@ def chave_relatorio(modulo_id, relatorio_id):
     return f'{modulo_id}.{relatorio_id}'
 
 
+def chaves_acesso_equivalentes(modulo_id, relatorio_id):
+    """Chaves de permissão que liberam o relatório, incluindo sucessor de relatório desativado."""
+    chave = chave_relatorio(modulo_id, relatorio_id)
+    if modulo_id == 'compras' and relatorio_id == 'pedidos_detalhado':
+        return {chave, 'compras.pedidos'}
+    return {chave}
+
+
+def relatorio_esta_ativo(modulo_id, relatorio_id):
+    _, relatorio = obter_relatorio(modulo_id, relatorio_id)
+    if not relatorio:
+        return False
+    return bool(relatorio.get('ativo', True))
+
+
 def listar_modulos():
     return RELATORIOS_CATALOGO
 
 
-def listar_relatorios_flat(incluir_admin_only=False):
+def listar_relatorios_flat(incluir_admin_only=False, incluir_inativos=False):
     """Retorna a lista plana de relatórios do catálogo.
 
     Por padrão exclui relatórios marcados com admin_only=True para que não
     entrem no sistema de permissões de usuários regulares.
     Passe incluir_admin_only=True para obter todas as chaves válidas (ex.: tokens OData).
+    Relatórios com ativo=False ficam de fora do menu e das permissões, a menos
+    que incluir_inativos=True.
     """
     relatorios = []
     for modulo in RELATORIOS_CATALOGO:
         for relatorio in modulo['relatorios']:
             if not incluir_admin_only and relatorio.get('admin_only'):
+                continue
+            if not incluir_inativos and not relatorio.get('ativo', True):
                 continue
             relatorios.append({
                 'modulo_id': modulo['id'],
