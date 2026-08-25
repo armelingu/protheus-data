@@ -1,6 +1,8 @@
 document.addEventListener('DOMContentLoaded', function() {
     var formCriar        = document.getElementById('form-criar-usuario');
     var listaUsuarios    = document.getElementById('lista-usuarios');
+    var paginacaoEl      = document.getElementById('paginacao-usuarios');
+    var contadorEl       = document.getElementById('contador-usuarios');
     var mensagem         = document.getElementById('mensagem');
     var novoIsAdmin      = document.getElementById('novo-is-admin');
     var novoIsGerente    = document.getElementById('novo-is-gerente');
@@ -11,6 +13,9 @@ document.addEventListener('DOMContentLoaded', function() {
     var catalogo         = JSON.parse(document.getElementById('admin-relatorios-catalogo').textContent || '[]');
     var mensagemTimeout  = null;
     var setoresCache     = [];
+    var usuariosCache    = [];
+    var paginaAtual      = 1;
+    var POR_PAGINA       = 10;
 
     function carregarSetores() {
         return fetch('/api/admin/setores')
@@ -306,13 +311,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     /* ── renderizar lista agrupada por setor ──────────────────────────────── */
-    function renderizarUsuarios(usuarios) {
-        if (!usuarios.length) {
-            listaUsuarios.innerHTML = '<p class="admin-vazio">Nenhum usuário cadastrado.</p>';
-            return;
-        }
-
-        /* agrupar por setor, "Sem setor" sempre por último */
+    function ordenarUsuariosPorSetor(usuarios) {
         var grupos = {};
         var ordemGrupos = [];
         usuarios.forEach(function(u) {
@@ -323,8 +322,34 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             grupos[chave].push(u);
         });
+        var idxSemSetor = ordemGrupos.indexOf('__sem_setor__');
+        if (idxSemSetor > -1) {
+            ordemGrupos.splice(idxSemSetor, 1);
+            ordemGrupos.push('__sem_setor__');
+        }
+        var ordenados = [];
+        ordemGrupos.forEach(function(chave) {
+            grupos[chave].forEach(function(u) { ordenados.push(u); });
+        });
+        return ordenados;
+    }
 
-        /* mover "Sem setor" para o final */
+    function renderizarUsuarios(usuarios) {
+        if (!usuarios.length) {
+            listaUsuarios.innerHTML = '<p class="admin-vazio">Nenhum usuário cadastrado.</p>';
+            return;
+        }
+
+        var grupos = {};
+        var ordemGrupos = [];
+        usuarios.forEach(function(u) {
+            var chave = u.setor_nome || '__sem_setor__';
+            if (!grupos[chave]) {
+                grupos[chave] = [];
+                ordemGrupos.push(chave);
+            }
+            grupos[chave].push(u);
+        });
         var idxSemSetor = ordemGrupos.indexOf('__sem_setor__');
         if (idxSemSetor > -1) {
             ordemGrupos.splice(idxSemSetor, 1);
@@ -353,12 +378,64 @@ document.addEventListener('DOMContentLoaded', function() {
 
         listaUsuarios.innerHTML = html;
 
-        /* bindar o "selecionar todos" em cada card */
         listaUsuarios.querySelectorAll('.admin-user-row').forEach(function(card) {
             var toggle = card.querySelector('.js-permissoes-all');
             var grid   = card.querySelector('.js-permissoes');
             if (toggle && grid) bindarToggleTodos(toggle, grid);
         });
+    }
+
+    function renderizarPaginacao(total) {
+        if (!paginacaoEl) return;
+        var totalPaginas = Math.ceil(total / POR_PAGINA) || 1;
+        if (total <= POR_PAGINA) {
+            paginacaoEl.innerHTML = '';
+            return;
+        }
+
+        var html = '<div class="audit-pag-inner">';
+        html += '<button type="button" class="audit-pag-btn" data-pag="prev"'
+              + (paginaAtual <= 1 ? ' disabled' : '') + '>Anterior</button>';
+
+        var inicio = Math.max(1, paginaAtual - 2);
+        var fim    = Math.min(totalPaginas, paginaAtual + 2);
+        if (inicio > 1) {
+            html += '<button type="button" class="audit-pag-num" data-pag="1">1</button>';
+            if (inicio > 2) html += '<span class="audit-pag-reticencias">...</span>';
+        }
+        for (var p = inicio; p <= fim; p++) {
+            var ativo = p === paginaAtual ? ' ativo' : '';
+            html += '<button type="button" class="audit-pag-num' + ativo + '" data-pag="' + p + '">' + p + '</button>';
+        }
+        if (fim < totalPaginas) {
+            if (fim < totalPaginas - 1) html += '<span class="audit-pag-reticencias">...</span>';
+            html += '<button type="button" class="audit-pag-num" data-pag="' + totalPaginas + '">' + totalPaginas + '</button>';
+        }
+        html += '<button type="button" class="audit-pag-btn" data-pag="next"'
+              + (paginaAtual >= totalPaginas ? ' disabled' : '') + '>Próxima</button>';
+        html += '</div>';
+
+        var inicioReg = (paginaAtual - 1) * POR_PAGINA + 1;
+        var fimReg    = Math.min(paginaAtual * POR_PAGINA, total);
+        html += '<p class="audit-pag-info">Exibindo ' + inicioReg + '-' + fimReg + ' de ' + total + ' usuários</p>';
+        paginacaoEl.innerHTML = html;
+    }
+
+    function atualizarContador(total) {
+        if (!contadorEl) return;
+        contadorEl.textContent = total ? '(' + total + ')' : '';
+    }
+
+    function renderizarPagina() {
+        var ordenados = ordenarUsuariosPorSetor(usuariosCache);
+        var total = ordenados.length;
+        var totalPaginas = Math.max(1, Math.ceil(total / POR_PAGINA) || 1);
+        if (paginaAtual > totalPaginas) paginaAtual = totalPaginas;
+        if (paginaAtual < 1) paginaAtual = 1;
+        var inicio = (paginaAtual - 1) * POR_PAGINA;
+        renderizarUsuarios(ordenados.slice(inicio, inicio + POR_PAGINA));
+        renderizarPaginacao(total);
+        atualizarContador(total);
     }
 
     function metaItem(label, valor) {
@@ -424,7 +501,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
             })
             .then(function(data) {
-                renderizarUsuarios(data.usuarios || []);
+                usuariosCache = data.usuarios || [];
+                renderizarPagina();
                 mostrarMensagem('Usuários carregados.', 'sucesso');
             })
             .catch(function(err) {
@@ -468,6 +546,9 @@ document.addEventListener('DOMContentLoaded', function() {
             renderizarCatalogoCriacao();
             alternarPermissoesCriacao();
             mostrarMensagem((data && data.mensagem) || 'Usuário criado com sucesso.', 'sucesso');
+            var painelNovo = document.getElementById('painel-novo-usuario');
+            if (painelNovo) painelNovo.open = false;
+            paginaAtual = 1;
             return carregarDados();
         })
         .catch(function(err) {
@@ -586,7 +667,41 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
+    /* ── painéis colapsáveis ──────────────────────────────────────────────── */
+    function persistirPaineis() {
+        document.querySelectorAll('details.admin-panel-collapsible').forEach(function(painel) {
+            var id = painel.getAttribute('data-panel');
+            if (!id) return;
+            var chave = 'admin.usuarios.panel.' + id;
+            try {
+                var salvo = window.localStorage.getItem(chave);
+                if (salvo === 'closed') painel.open = false;
+                if (salvo === 'open') painel.open = true;
+            } catch (err) {}
+            painel.addEventListener('toggle', function() {
+                try {
+                    window.localStorage.setItem(chave, painel.open ? 'open' : 'closed');
+                } catch (err2) {}
+            });
+        });
+    }
+
+    if (paginacaoEl) {
+        paginacaoEl.addEventListener('click', function(event) {
+            var btn = event.target.closest('[data-pag]');
+            if (!btn || btn.disabled) return;
+            var val = btn.getAttribute('data-pag');
+            if (val === 'prev') paginaAtual -= 1;
+            else if (val === 'next') paginaAtual += 1;
+            else paginaAtual = parseInt(val, 10) || 1;
+            renderizarPagina();
+            var listaPainel = document.getElementById('painel-usuarios-lista');
+            if (listaPainel) listaPainel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+    }
+
     /* ── init ─────────────────────────────────────────────────────────────── */
+    persistirPaineis();
     novoIsAdmin.addEventListener('change', alternarPermissoesCriacao);
     renderizarCatalogoCriacao();
     alternarPermissoesCriacao();
