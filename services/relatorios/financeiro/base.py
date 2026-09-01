@@ -377,6 +377,57 @@ def sincronizar(
         raise
 
 
+def sincronizar_cadastro(nome_cursor, query_completa, sqlite_tabela, sync_log_tabela, fn_upsert):
+    """Snapshot completo para cadastros sem janela de data (ex.: SA2).
+
+    Busca o universo ativo no Protheus, faz upsert das mudanças e remove
+    recnos locais que não voltaram (exclusão lógica no Protheus).
+    Lista vazia não apaga o local — protege contra falha transitória.
+    """
+    try:
+        linhas = executar_select(query_completa)
+    except Exception as exc:
+        registrar_sync(sync_log_tabela, 0, 'erro', str(exc)[:300])
+        raise
+
+    recnos_protheus = {int(r[0]) for r in linhas} if linhas else set()
+    if not recnos_protheus:
+        registrar_sync(sync_log_tabela, 0, 'sem_novos')
+        return 0
+
+    conn = conectar_financeiro()
+    try:
+        novos = atualizados = 0
+        try:
+            novos, atualizados = _contar_mudancas(conn, sqlite_tabela, linhas)
+        except Exception as exc_diff:
+            print(f'[FINANCEIRO] {sqlite_tabela}: diff falhou ({exc_diff}); upsert cego.')
+            novos, atualizados = len(linhas), 0
+
+        if (novos + atualizados) > 0:
+            fn_upsert(conn, linhas)
+
+        locais = {r[0] for r in conn.execute(f'SELECT recno FROM {sqlite_tabela}')}
+        a_remover = locais - recnos_protheus
+        removidos = 0
+        if a_remover:
+            placeholder = ','.join(['?'] * len(a_remover))
+            cur = conn.execute(
+                f'DELETE FROM {sqlite_tabela} WHERE recno IN ({placeholder})',
+                list(a_remover),
+            )
+            removidos = cur.rowcount or len(a_remover)
+
+        _salvar_cursor(conn, nome_cursor, max(recnos_protheus))
+        conn.commit()
+    finally:
+        conn.close()
+
+    mutacoes = novos + atualizados + removidos
+    registrar_sync(sync_log_tabela, mutacoes, 'sucesso' if mutacoes > 0 else 'sem_novos')
+    return mutacoes
+
+
 # ─── Info e histórico ─────────────────────────────────────────────────────────
 
 def info_relatorio(sqlite_tabela, sync_log_tabela):

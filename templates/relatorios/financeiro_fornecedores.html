@@ -8,27 +8,12 @@
 <section class="painel">
     <header class="painel-topo">
         <div class="painel-cabecalho">
-            <p class="painel-kicker">Módulo compras</p>
-            <h1>Pedidos de Compra</h1>
-            <p class="subtitulo">Pedidos de compra com centro de custo, item orçamentário, conta, condição de pagamento, data da última edição e revisão.</p>
+            <p class="painel-kicker">Módulo financeiro</p>
+            <h1>Fornecedores</h1>
+            <p class="subtitulo">Cadastro de fornecedores do Protheus: identificação, endereço, banco, natureza e situação.</p>
         </div>
 
         <div class="painel-controles">
-            <div class="filtro-datas">
-                <span class="info-label">Período</span>
-                <div class="filtro-datas-inputs">
-                    <label class="filtro-data-label">
-                        <span>De</span>
-                        <input type="date" id="filtro-data-inicio" title="Data de início">
-                    </label>
-                    <label class="filtro-data-label">
-                        <span>Até</span>
-                        <input type="date" id="filtro-data-fim" title="Data de fim">
-                    </label>
-                    <button type="button" id="btn-limpar-filtro" class="btn-terciario" title="Limpar filtro de data">✕</button>
-                </div>
-            </div>
-
             <div class="formato-download">
                 <span class="info-label">Formato</span>
                 <div class="formato-opcoes">
@@ -98,5 +83,6 @@
 {% endblock %}
 
 {% block extra_scripts %}
-<script src="/statics/js/compras/pedidos_detalhado.js"></script>
+<script src="/statics/js/financeiro/fornecedores.js"></script>
+<script src="/statics/js/financeiro/_base.js"></script>
 {% endblock %}

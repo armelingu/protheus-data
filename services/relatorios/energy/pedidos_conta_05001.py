@@ -47,7 +47,7 @@ COLUNAS = [
     'PRECO_TOTAL', 'DATA_ENTREGA', 'NUMERO_SC', 'ITEM_SC',
     'OBSERVACOES', 'CLASSE_VALOR', 'QTD_ENTREGUE', 'NUM_COTACAO',
     'MOEDA', 'COD_FORNECEDOR', 'FORNECEDOR', 'DEPOSITO_ESTOQUE',
-    'DATA_EMISSAO', 'REVISAO', 'APROVADOR', 'DATA_APROVACAO', 'STATUS_APROVACAO',
+    'DATA_EMISSAO', 'DATA_ULTIMA_EDICAO', 'REVISAO', 'APROVADOR', 'DATA_APROVACAO', 'STATUS_APROVACAO',
 ]
 
 # OUTER APPLY traz a aprovação mais relevante por item:
@@ -78,6 +78,7 @@ SELECT
     SA2.A2_NOME       AS FORNECEDOR,
     SC7.C7_LOCAL      AS DEPOSITO_ESTOQUE,
     SC7.C7_EMISSAO    AS DATA_EMISSAO,
+    ULT_ED.DATA_ULTIMA_EDICAO                         AS DATA_ULTIMA_EDICAO,
     RTRIM(SC7.C7_XREVISA)                             AS REVISAO,
     ISNULL(APR_REL.AK_NOME, '')                           AS APROVADOR,
     ISNULL(CONVERT(VARCHAR, APR_REL.CR_DATALIB, 103), '') AS DATA_APROVACAO,
@@ -114,6 +115,13 @@ OUTER APPLY (
         CASE WHEN APR.CR_STATUS IN ('01', '02') THEN 0 ELSE 1 END ASC,
         APR.CR_NIVEL ASC
 ) APR_REL
+OUTER APPLY (
+    SELECT MAX(NULLIF(RTRIM(C7_XDTEMIS), '')) AS DATA_ULTIMA_EDICAO
+    FROM SC7010A
+    WHERE C7_FILIAL = SC7.C7_FILIAL
+      AND C7_NUM = SC7.C7_NUM
+      AND D_E_L_E_T_ = ''
+) AS ULT_ED
 WHERE SC7.D_E_L_E_T_ = ''
   AND (
         SC7.C7_ITEMCTA = '{ITEM_CONTABIL}'
@@ -136,8 +144,8 @@ INSERT_PEDIDO = f'''
      descricao_produto, quantidade, preco_unitario, preco_total,
      data_entrega, numero_sc, item_sc, observacoes, classe_valor,
      qtd_entregue, num_cotacao, moeda, cod_fornecedor, fornecedor,
-     deposito_estoque, data_emissao, revisao, aprovador, data_aprovacao, status_aprovacao)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     deposito_estoque, data_emissao, data_ultima_edicao, revisao, aprovador, data_aprovacao, status_aprovacao)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(filial, pedido_compra, item) DO UPDATE SET
         usuario           = excluded.usuario,
         produto           = excluded.produto,
@@ -158,6 +166,7 @@ INSERT_PEDIDO = f'''
         fornecedor        = excluded.fornecedor,
         deposito_estoque  = excluded.deposito_estoque,
         data_emissao      = excluded.data_emissao,
+        data_ultima_edicao = excluded.data_ultima_edicao,
         revisao           = excluded.revisao,
         aprovador         = excluded.aprovador,
         data_aprovacao    = excluded.data_aprovacao,
@@ -169,7 +178,7 @@ SELECT_PEDIDOS = (
     f'descricao_produto, quantidade, preco_unitario, preco_total, '
     f'data_entrega, numero_sc, item_sc, observacoes, classe_valor, '
     f'qtd_entregue, num_cotacao, moeda, cod_fornecedor, fornecedor, '
-    f'deposito_estoque, data_emissao, revisao, aprovador, '
+    f'deposito_estoque, data_emissao, data_ultima_edicao, revisao, aprovador, '
     f'data_aprovacao, status_aprovacao FROM {TABELA}'
 )
 
@@ -380,7 +389,7 @@ def _construir_query_export(data_inicio=None, data_fim=None):
         f'descricao_produto, quantidade, preco_unitario, preco_total, '
         f'data_entrega, numero_sc, item_sc, observacoes, classe_valor, '
         f'qtd_entregue, num_cotacao, moeda, cod_fornecedor, fornecedor, '
-        f'deposito_estoque, data_emissao, revisao, aprovador, '
+        f'deposito_estoque, data_emissao, data_ultima_edicao, revisao, aprovador, '
         f'data_aprovacao, status_aprovacao FROM {TABELA}'
     )
     params = []

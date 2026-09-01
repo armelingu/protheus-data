@@ -564,6 +564,7 @@ def criar_tabelas():
             fornecedor TEXT,
             deposito_estoque TEXT,
             data_emissao TEXT,
+            data_ultima_edicao TEXT,
             revisao TEXT,
             nivel_aprovacao TEXT NOT NULL DEFAULT '',
             aprovador TEXT,
@@ -585,6 +586,7 @@ def criar_tabelas():
         'ON pedidos_detalhado(data_emissao)'
     )
     _garantir_coluna(conn, 'pedidos_detalhado', 'revisao', 'TEXT')
+    _garantir_coluna(conn, 'pedidos_detalhado', 'data_ultima_edicao', 'TEXT')
     conn.execute('''
         CREATE TABLE IF NOT EXISTS pedidos_detalhado_sync_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -680,6 +682,7 @@ def criar_tabelas():
             fornecedor TEXT,
             deposito_estoque TEXT,
             data_emissao TEXT,
+            data_ultima_edicao TEXT,
             revisao TEXT,
             aprovador TEXT,
             data_aprovacao TEXT,
@@ -692,6 +695,7 @@ def criar_tabelas():
         'ON pedidos_conta_05001(data_emissao)'
     )
     _garantir_coluna(conn, 'pedidos_conta_05001', 'revisao', 'TEXT')
+    _garantir_coluna(conn, 'pedidos_conta_05001', 'data_ultima_edicao', 'TEXT')
     conn.execute('''
         CREATE TABLE IF NOT EXISTS pedidos_conta_05001_sync_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1142,6 +1146,38 @@ def criar_tabelas_financeiro():
         'CREATE INDEX IF NOT EXISTS idx_financeiro_downloads_log_relatorio '
         'ON financeiro_downloads_log(relatorio, data_hora)'
     )
+
+    # ── SA2010 — Cadastro de Fornecedores ────────────────────────────────────
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS fornecedores (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            recno     INTEGER UNIQUE NOT NULL,
+            A2_FILIAL  TEXT, A2_COD    TEXT, A2_LOJA    TEXT,
+            A2_NOME    TEXT, A2_NREDUZ TEXT,
+            A2_TIPO    TEXT, A2_TPESSOA TEXT, A2_CGC    TEXT, A2_PFISICA TEXT,
+            A2_INSCR   TEXT, A2_INSCRM TEXT,
+            A2_END     TEXT, A2_NR_END TEXT, A2_COMPLEM TEXT, A2_BAIRRO TEXT,
+            A2_MUN     TEXT, A2_EST    TEXT, A2_CEP     TEXT, A2_PAIS   TEXT, A2_COD_MUN TEXT,
+            A2_DDD     TEXT, A2_TEL    TEXT, A2_EMAIL   TEXT, A2_CONTATO TEXT,
+            A2_NATUREZ TEXT, A2_COND   TEXT, A2_CONTA   TEXT,
+            A2_BANCO   TEXT, A2_AGENCIA TEXT, A2_NUMCON TEXT, A2_PIX TEXT, A2_TPPIX TEXT, A2_FORMPAG TEXT,
+            A2_MSBLQL  TEXT, A2_CODBLO TEXT, A2_DATBLO  TEXT, A2_STATUS TEXT,
+            A2_XREST   TEXT, A2_XTIPO  TEXT,
+            A2_CNAE    TEXT, A2_SIMPNAC TEXT,
+            A2_RECISS  TEXT, A2_CALCIRF TEXT, A2_RECINSS TEXT, A2_RECPIS TEXT, A2_RECCOFI TEXT, A2_RECCSLL TEXT,
+            A2_PRICOM  TEXT, A2_ULTCOM TEXT
+        )
+    ''')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_fornecedores_cod ON fornecedores(A2_COD, A2_LOJA)')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_fornecedores_cgc ON fornecedores(A2_CGC)')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_fornecedores_nome ON fornecedores(A2_NOME)')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS fornecedores_sync_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            executado_em TEXT, registros_novos INTEGER DEFAULT 0,
+            status TEXT, erro_resumo TEXT
+        )
+    ''')
 
     conn.commit()
     conn.close()

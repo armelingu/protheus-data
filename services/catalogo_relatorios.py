@@ -31,7 +31,7 @@ RELATORIOS_CATALOGO = [
             {
                 'id': 'pedidos_detalhado',
                 'titulo': 'Pedidos de Compra',
-                'descricao': 'Pedidos de compra com centro de custo, item orçamentário, conta, condição de pagamento e revisão.',
+                'descricao': 'Pedidos de compra com centro de custo, item orçamentário, conta, condição de pagamento, data da última edição e revisão.',
                 'path': '/relatorios/compras/pedidos-detalhado',
                 'api_base': '/api/relatorios/compras/pedidos-detalhado',
                 'ativo': True,
@@ -56,7 +56,7 @@ RELATORIOS_CATALOGO = [
     {
         'id': 'financeiro',
         'titulo': 'Controladoria Financeira',
-        'descricao': 'Notas fiscais, contas a pagar e a receber, e movimentos bancários.',
+        'descricao': 'Notas fiscais, contas a pagar e a receber, movimentos bancários e cadastro de fornecedores.',
         'relatorios': [
             {
                 'id': 'nf_entrada',
@@ -96,6 +96,14 @@ RELATORIOS_CATALOGO = [
                 'descricao': 'Entradas e saídas nas contas bancárias, a partir de 2024.',
                 'path': '/relatorios/financeiro/mov-bancarios',
                 'api_base': '/api/relatorios/financeiro/mov-bancarios',
+                'ativo': True,
+            },
+            {
+                'id': 'fornecedores',
+                'titulo': 'Fornecedores',
+                'descricao': 'Cadastro de fornecedores do Protheus: identificação, endereço, banco, natureza e situação.',
+                'path': '/relatorios/financeiro/fornecedores',
+                'api_base': '/api/relatorios/financeiro/fornecedores',
                 'ativo': True,
             },
         ],

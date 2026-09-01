@@ -139,6 +139,14 @@ from services.relatorios.financeiro.mov_bancarios import (
     sincronizar_mov_bancarios, carga_inicial_mov_bancarios,
     QUERY_PAGINADA as QUERY_MOV_BANCARIOS,
 )
+from services.relatorios.financeiro.fornecedores import (
+    gerar_csv_fornecedores, gerar_excel_fornecedores,
+    info_relatorio_fornecedores, historico_sync_fornecedores,
+    sincronizar_fornecedores, carga_inicial_fornecedores,
+    full_refresh_fornecedores,
+    QUERY_PREVIEW as QUERY_FORNECEDORES,
+    COLUNAS_HEADER as COLUNAS_FORNECEDORES,
+)
 from services.email_service import montar_email_acesso, montar_email_recuperacao_senha, montar_email_aviso_melhoria, enviar_email, configuracao_email
 from services.avisos_melhoria import (
     criar_aviso,
@@ -1312,6 +1320,7 @@ def rotina_sync():
                                 ('Contas a Receber',     sincronizar_contas_receber),
                                 ('Contas a Pagar',       sincronizar_contas_pagar),
                                 ('Movimentos Bancários', sincronizar_mov_bancarios),
+                                ('Fornecedores',         sincronizar_fornecedores),
                                 ('Energy — Contas a Pagar', sincronizar_energy_contas_pagar),
                             ]
                             from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -1605,6 +1614,7 @@ ENDPOINTS_POWER_BI = [
     {'chave': 'financeiro.contas_receber','tag': 'Contas a Receber','titulo': 'Contas a Receber',      'url_path': '/odata/contas-receber'},
     {'chave': 'financeiro.contas_pagar', 'tag': 'Contas a Pagar',   'titulo': 'Contas a Pagar',        'url_path': '/odata/contas-pagar'},
     {'chave': 'financeiro.mov_bancarios','tag': 'Mov. Bancários',   'titulo': 'Movimentos Bancários',  'url_path': '/odata/mov-bancarios'},
+    {'chave': 'financeiro.fornecedores', 'tag': 'Fornecedores',     'titulo': 'Fornecedores',          'url_path': '/odata/fornecedores'},
     {'chave': 'energy.contas_pagar',     'tag': 'Energy CP',        'titulo': 'Energy — Contas a Pagar', 'url_path': '/odata/energy-contas-pagar'},
 ]
 
@@ -1863,6 +1873,7 @@ _ODATA_METADATA_XML = '''<?xml version="1.0" encoding="utf-8"?>
         <Property Name="fornecedor"        Type="Edm.String"/>
         <Property Name="deposito_estoque"  Type="Edm.String"/>
         <Property Name="data_emissao"      Type="Edm.String"/>
+        <Property Name="data_ultima_edicao" Type="Edm.String"/>
         <Property Name="revisao"           Type="Edm.String"/>
         <Property Name="nivel_aprovacao"   Type="Edm.String" Nullable="false"/>
         <Property Name="aprovador"         Type="Edm.String"/>
@@ -2046,6 +2057,61 @@ _ODATA_METADATA_XML = '''<?xml version="1.0" encoding="utf-8"?>
         <Property Name="E5_DTDIGIT"  Type="Edm.String"/>
       </EntityType>
 
+      <!-- ─── Financeiro — Fornecedores (SA2010) ─────────────────────────── -->
+      <EntityType Name="Fornecedor">
+        <Key><PropertyRef Name="recno"/></Key>
+        <Property Name="recno"       Type="Edm.Int64" Nullable="false"/>
+        <Property Name="A2_FILIAL"   Type="Edm.String"/>
+        <Property Name="A2_COD"      Type="Edm.String"/>
+        <Property Name="A2_LOJA"     Type="Edm.String"/>
+        <Property Name="A2_NOME"     Type="Edm.String"/>
+        <Property Name="A2_NREDUZ"   Type="Edm.String"/>
+        <Property Name="A2_TIPO"     Type="Edm.String"/>
+        <Property Name="A2_TPESSOA"  Type="Edm.String"/>
+        <Property Name="A2_CGC"      Type="Edm.String"/>
+        <Property Name="A2_PFISICA"  Type="Edm.String"/>
+        <Property Name="A2_INSCR"    Type="Edm.String"/>
+        <Property Name="A2_INSCRM"   Type="Edm.String"/>
+        <Property Name="A2_END"      Type="Edm.String"/>
+        <Property Name="A2_NR_END"   Type="Edm.String"/>
+        <Property Name="A2_COMPLEM"  Type="Edm.String"/>
+        <Property Name="A2_BAIRRO"   Type="Edm.String"/>
+        <Property Name="A2_MUN"      Type="Edm.String"/>
+        <Property Name="A2_EST"      Type="Edm.String"/>
+        <Property Name="A2_CEP"      Type="Edm.String"/>
+        <Property Name="A2_PAIS"     Type="Edm.String"/>
+        <Property Name="A2_COD_MUN"  Type="Edm.String"/>
+        <Property Name="A2_DDD"      Type="Edm.String"/>
+        <Property Name="A2_TEL"      Type="Edm.String"/>
+        <Property Name="A2_EMAIL"    Type="Edm.String"/>
+        <Property Name="A2_CONTATO"  Type="Edm.String"/>
+        <Property Name="A2_NATUREZ"  Type="Edm.String"/>
+        <Property Name="A2_COND"     Type="Edm.String"/>
+        <Property Name="A2_CONTA"    Type="Edm.String"/>
+        <Property Name="A2_BANCO"    Type="Edm.String"/>
+        <Property Name="A2_AGENCIA"  Type="Edm.String"/>
+        <Property Name="A2_NUMCON"   Type="Edm.String"/>
+        <Property Name="A2_PIX"      Type="Edm.String"/>
+        <Property Name="A2_TPPIX"    Type="Edm.String"/>
+        <Property Name="A2_FORMPAG"  Type="Edm.String"/>
+        <Property Name="A2_MSBLQL"   Type="Edm.String"/>
+        <Property Name="A2_CODBLO"   Type="Edm.String"/>
+        <Property Name="A2_DATBLO"   Type="Edm.String"/>
+        <Property Name="A2_STATUS"   Type="Edm.String"/>
+        <Property Name="A2_XREST"    Type="Edm.String"/>
+        <Property Name="A2_XTIPO"    Type="Edm.String"/>
+        <Property Name="A2_CNAE"     Type="Edm.String"/>
+        <Property Name="A2_SIMPNAC"  Type="Edm.String"/>
+        <Property Name="A2_RECISS"   Type="Edm.String"/>
+        <Property Name="A2_CALCIRF"  Type="Edm.String"/>
+        <Property Name="A2_RECINSS"  Type="Edm.String"/>
+        <Property Name="A2_RECPIS"   Type="Edm.String"/>
+        <Property Name="A2_RECCOFI"  Type="Edm.String"/>
+        <Property Name="A2_RECCSLL"  Type="Edm.String"/>
+        <Property Name="A2_PRICOM"   Type="Edm.String"/>
+        <Property Name="A2_ULTCOM"   Type="Edm.String"/>
+      </EntityType>
+
       <!-- ─── Energy — Contas a Pagar (subset SE2010 do negócio Energy) ───── -->
       <!-- Colunas com nomes amigáveis (Filial, Vencimento, ...) preservando os aliases da query original -->
       <EntityType Name="EnergyContasPagar">
@@ -2117,6 +2183,7 @@ _ODATA_METADATA_XML = '''<?xml version="1.0" encoding="utf-8"?>
         <Property Name="fornecedor"        Type="Edm.String"/>
         <Property Name="deposito_estoque"  Type="Edm.String"/>
         <Property Name="data_emissao"      Type="Edm.String"/>
+        <Property Name="data_ultima_edicao" Type="Edm.String"/>
         <Property Name="revisao"           Type="Edm.String"/>
         <Property Name="aprovador"         Type="Edm.String"/>
         <Property Name="data_aprovacao"    Type="Edm.String"/>
@@ -2132,6 +2199,7 @@ _ODATA_METADATA_XML = '''<?xml version="1.0" encoding="utf-8"?>
         <EntitySet Name="ContasReceber"     EntityType="ProtheusData.ContasReceber"/>
         <EntitySet Name="ContasPagar"       EntityType="ProtheusData.ContasPagar"/>
         <EntitySet Name="MovBancarios"      EntityType="ProtheusData.MovBancario"/>
+        <EntitySet Name="Fornecedores"      EntityType="ProtheusData.Fornecedor"/>
         <EntitySet Name="EnergyContasPagar" EntityType="ProtheusData.EnergyContasPagar"/>
       </EntityContainer>
 
@@ -2431,6 +2499,7 @@ def odata_service_document():
             {'name': 'ContasReceber',    'kind': 'EntitySet', 'url': 'contas-receber'},
             {'name': 'ContasPagar',      'kind': 'EntitySet', 'url': 'contas-pagar'},
             {'name': 'MovBancarios',     'kind': 'EntitySet', 'url': 'mov-bancarios'},
+            {'name': 'Fornecedores',     'kind': 'EntitySet', 'url': 'fornecedores'},
             {'name': 'EnergyContasPagar','kind': 'EntitySet', 'url': 'energy-contas-pagar'},
         ],
     }
@@ -2458,7 +2527,7 @@ _ODATA_PEDIDOS_COLUNAS = [
     'descricao_produto', 'quantidade', 'preco_unitario', 'preco_total',
     'data_entrega', 'numero_sc', 'item_sc', 'observacoes', 'classe_valor',
     'qtd_entregue', 'num_cotacao', 'moeda', 'cod_fornecedor', 'fornecedor',
-    'deposito_estoque', 'data_emissao', 'revisao', 'nivel_aprovacao', 'aprovador',
+    'deposito_estoque', 'data_emissao', 'data_ultima_edicao', 'revisao', 'nivel_aprovacao', 'aprovador',
     'data_aprovacao', 'status_aprovacao',
     'centro_custo', 'centro_custo_desc',
     'item_conta', 'item_conta_desc',
@@ -2487,7 +2556,7 @@ _ODATA_ENERGY_PEDIDOS_COLUNAS = [
     'descricao_produto', 'quantidade', 'preco_unitario', 'preco_total',
     'data_entrega', 'numero_sc', 'item_sc', 'observacoes', 'classe_valor',
     'qtd_entregue', 'num_cotacao', 'moeda', 'cod_fornecedor', 'fornecedor',
-    'deposito_estoque', 'data_emissao', 'revisao', 'aprovador',
+    'deposito_estoque', 'data_emissao', 'data_ultima_edicao', 'revisao', 'aprovador',
     'data_aprovacao', 'status_aprovacao',
 ]
 
@@ -2702,6 +2771,24 @@ def odata_mov_bancarios():
         colunas=_ODATA_MOV_BANCARIOS_COLUNAS,
         order_by='E5_DATA DESC, recno',
         url_path='/odata/mov-bancarios',
+    )
+
+
+_ODATA_FORNECEDORES_COLUNAS = ['recno'] + list(COLUNAS_FORNECEDORES)
+
+
+@app.route('/odata/fornecedores')
+def odata_fornecedores():
+    _, erro = _autorizar_odata('financeiro', 'fornecedores', 'Fornecedores')
+    if erro:
+        return erro
+    return _odata_paged_response(
+        entity_name='Fornecedores',
+        conectar_fn=conectar_financeiro,
+        tabela='fornecedores',
+        colunas=_ODATA_FORNECEDORES_COLUNAS,
+        order_by='A2_COD, A2_LOJA, recno',
+        url_path='/odata/fornecedores',
     )
 
 
@@ -4484,6 +4571,44 @@ def api_financeiro_mov_bancarios_download():
     )
 
 
+# ── Fornecedores ──────────────────────────────────────────────────────────────
+
+@app.route('/relatorios/financeiro/fornecedores')
+@acesso_relatorio_requerido('financeiro', 'fornecedores')
+def pagina_financeiro_fornecedores():
+    usuario = usuario_atual()
+    pode_ver_query = bool(usuario and usuario['is_admin'] and usuario['pode_ver_query'])
+    return render_template(
+        'relatorios/financeiro_fornecedores.html',
+        query_preview=QUERY_FORNECEDORES if pode_ver_query else '',
+        pode_ver_query=pode_ver_query,
+        **contexto_auth('ProtheusData - Fornecedores'),
+    )
+
+@app.route('/api/relatorios/financeiro/fornecedores/info')
+@acesso_relatorio_requerido('financeiro', 'fornecedores')
+def api_financeiro_fornecedores_info():
+    return _financeiro_info_response(info_relatorio_fornecedores)
+
+@app.route('/api/relatorios/financeiro/fornecedores/historico-sync')
+@acesso_relatorio_requerido('financeiro', 'fornecedores')
+def api_financeiro_fornecedores_historico():
+    return _financeiro_historico_response(historico_sync_fornecedores)
+
+@app.route('/api/relatorios/financeiro/fornecedores/sync', methods=['POST'])
+@acesso_relatorio_requerido('financeiro', 'fornecedores')
+def api_financeiro_fornecedores_sync():
+    return _financeiro_sync_response(sincronizar_fornecedores, 'fornecedores')
+
+@app.route('/api/relatorios/financeiro/fornecedores/download')
+@acesso_relatorio_requerido('financeiro', 'fornecedores')
+def api_financeiro_fornecedores_download():
+    fmt = request.args.get('formato', 'csv')
+    return _financeiro_download_response(
+        gerar_csv_fornecedores, gerar_excel_fornecedores, 'fornecedores', fmt, None, None
+    )
+
+
 # ── Energy — Contas a Pagar ──────────────────────────────────────────────────
 
 @app.route('/relatorios/energy/contas-pagar')
@@ -4916,6 +5041,7 @@ def api_admin_full_refresh():
         'pedidos_detalhado':     carga_completa_pedidos_detalhado,
         'pedidos_conta_05001':   carga_completa_pedidos_conta_05001,
         'energy_pedidos':        carga_completa_pedidos_conta_05001,
+        'fornecedores':          full_refresh_fornecedores,
     }
 
     def _rodar_em_background(fn, nome):
@@ -5110,6 +5236,7 @@ def inicializar():
             ('Contas a Receber',     carga_inicial_contas_receber),
             ('Contas a Pagar',       carga_inicial_contas_pagar),
             ('Movimentos Bancários', carga_inicial_mov_bancarios),
+            ('Fornecedores',         carga_inicial_fornecedores),
             ('Energy — Contas a Pagar', carga_inicial_energy_contas_pagar),
         ]
         for nome_fin, fn_fin in _financeiro_cargas_iniciais:
