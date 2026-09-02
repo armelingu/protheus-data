@@ -52,6 +52,9 @@ integracao_pedcom/
 htmlcov/
 .pytest_cache/
 
+# Protótipo do redesign (não faz parte do app de produção)
+protheusdata_v2/
+
 # SSH e segredos locais
 *.pem
 *.key
