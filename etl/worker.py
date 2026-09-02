@@ -48,24 +48,16 @@ except Exception:
 from services.database import criar_tabelas, criar_backup_diario
 from services.email_service import enviar_email
 
+# Relatórios inativos no catálogo (compras.pedidos, compras.historico,
+# energy.pedidos) saem da agenda. Tabelas e rotas ficam para eventual
+# reativação; o sync horário e o full das 02:00 não os tocam.
+
 # Compras
-from services.relatorios.compras.pedidos import (
-    carga_completa          as full_refresh_pedidos,
-    sincronizar             as sync_pedidos,
-    carga_inicial           as carga_inicial_pedidos,
-    registrar_sync_event    as log_pedidos,
-)
 from services.relatorios.compras.pedidos_detalhado import (
     carga_completa          as full_refresh_pedidos_det,
     sincronizar             as sync_pedidos_det,
     carga_inicial           as carga_inicial_pedidos_det,
     registrar_sync_event    as log_pedidos_det,
-)
-from services.relatorios.compras.historico_pedidos import (
-    carga_completa_historico as full_refresh_historico,
-    sincronizar_historico    as sync_historico,
-    carga_inicial_historico  as carga_inicial_historico,
-    registrar_sync_event_historico as log_historico,
 )
 from services.relatorios.compras.pendencia_aprovacao import (
     carga_completa          as full_refresh_pendencia,
@@ -75,12 +67,6 @@ from services.relatorios.compras.pendencia_aprovacao import (
 )
 
 # Energy
-from services.relatorios.energy.pedidos import (
-    carga_completa          as full_refresh_pedidos_energy,
-    sincronizar             as sync_pedidos_energy,
-    carga_inicial           as carga_inicial_pedidos_energy,
-    registrar_sync_event    as log_pedidos_energy,
-)
 from services.relatorios.energy.pedidos_conta_05001 import (
     carga_completa          as full_refresh_pedidos_05001,
     sincronizar             as sync_pedidos_05001,
@@ -240,11 +226,8 @@ _sync_lock         = threading.Lock()
 
 # Módulos que usam hash-based full refresh (pedidos / estoque)
 _JOBS_HASH = [
-    ('Pedidos de Compra',           full_refresh_pedidos),
     ('Pedidos de Compra Detalhado', full_refresh_pedidos_det),
-    ('Histórico de Pedidos',        full_refresh_historico),
     ('Pendência de Aprovação',      full_refresh_pendencia),
-    ('Pedidos Energy',              full_refresh_pedidos_energy),
     ('Pedidos Conta 05.001',        full_refresh_pedidos_05001),
     ('Estoque - Saldos',            full_refresh_estoque),
 ]
@@ -263,11 +246,8 @@ _JOBS_FINANCEIRO = [
 ]
 
 _JOBS_SYNC_INCREMENTAL = [
-    ('Pedidos de Compra',           sync_pedidos),
     ('Pedidos de Compra Detalhado', sync_pedidos_det),
-    ('Histórico de Pedidos',        sync_historico),
     ('Pendência de Aprovação',      sync_pendencia),
-    ('Pedidos Energy',              sync_pedidos_energy),
     ('Pedidos Conta 05.001',        sync_pedidos_05001),
     ('Estoque - Saldos',            sync_estoque),
 ]
@@ -284,11 +264,8 @@ _JOBS_SYNC_FINANCEIRO = [
 ]
 
 _JOBS_CARGA_INICIAL = [
-    ('Pedidos de Compra',           carga_inicial_pedidos),
     ('Pedidos de Compra Detalhado', carga_inicial_pedidos_det),
-    ('Histórico de Pedidos',        carga_inicial_historico),
     ('Pendência de Aprovação',      carga_inicial_pendencia),
-    ('Pedidos Energy',              carga_inicial_pedidos_energy),
     ('Pedidos Conta 05.001',        carga_inicial_pedidos_05001),
     ('Estoque - Saldos',            carga_inicial_estoque),
     ('NF Entrada',                  carga_inicial_nf_entrada),

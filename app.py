@@ -5193,26 +5193,14 @@ def inicializar():
     limpar_logs_antigos()
     print('[STARTUP] Verificando carga inicial...')
     try:
-        total_pedidos         = carga_inicial_pedidos()
         total_estoque         = carga_inicial_estoque()
-        total_historico       = carga_inicial_historico()
         total_pendencia       = carga_inicial_pendencia_aprovacao()
         total_conta_05001     = carga_inicial_pedidos_conta_05001()
         total_pedidos_det     = carga_inicial_pedidos_detalhado()
-        if total_pedidos > 0:
-            print(f'[STARTUP] Carga inicial de pedidos concluída. {total_pedidos} registros importados.')
-        else:
-            print('[STARTUP] Dados de pedidos já existem no banco local.')
-
         if total_estoque > 0:
             print(f'[STARTUP] Carga inicial de estoque concluída. {total_estoque} registros importados.')
         else:
             print('[STARTUP] Dados de estoque já existem no banco local.')
-
-        if total_historico > 0:
-            print(f'[STARTUP] Carga inicial do histórico concluída. {total_historico} registros importados.')
-        else:
-            print('[STARTUP] Dados do histórico de pedidos já existem no banco local.')
 
         if total_pendencia > 0:
             print(f'[STARTUP] Carga inicial de pendências de aprovação concluída. {total_pendencia} registros importados.')
